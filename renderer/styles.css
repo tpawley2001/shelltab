@@ -1,0 +1,700 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-dark: #1e1e2e;
+  --bg-mid: #2a2a3c;
+  --bg-light: #363649;
+  --bg-hover: #45455a;
+  --accent: #89b4fa;
+  --accent-dim: #585b70;
+  --text: #cdd6f4;
+  --text-dim: #a6adc8;
+  --red: #f38ba8;
+  --green: #a6e3a1;
+  --yellow: #f9e2af;
+  --border: #45455a;
+}
+
+body {
+  font-family: 'Segoe UI', 'Ubuntu', 'Cantarell', sans-serif;
+  background: var(--bg-dark);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Toolbar */
+#toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-mid);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#toolbar button {
+  background: var(--bg-light);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#toolbar button:hover {
+  background: var(--bg-hover);
+}
+
+/* Tab bar */
+#tab-bar {
+  display: flex;
+  background: var(--bg-mid);
+  border-bottom: 2px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+  min-height: 32px;
+}
+
+#tab-bar::-webkit-scrollbar {
+  height: 3px;
+}
+
+#tab-bar::-webkit-scrollbar-thumb {
+  background: var(--accent-dim);
+  border-radius: 2px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-dark);
+  color: var(--text-dim);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 13px;
+  min-width: 100px;
+  user-select: none;
+}
+
+.tab:hover {
+  background: var(--bg-light);
+}
+
+.tab.active {
+  background: var(--bg-dark);
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: -2px;
+}
+
+.tab .tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab .tab-close {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 14px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.tab .tab-close:hover {
+  background: var(--red);
+  color: #fff;
+}
+
+/* Main content */
+#main-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Terminal container */
+#terminal-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.term-wrapper {
+  position: absolute;
+  inset: 0;
+  padding: 4px;
+  display: none;
+}
+
+.term-wrapper.active {
+  display: block;
+}
+
+.term-wrapper .xterm {
+  height: 100%;
+}
+
+/* FTP panel */
+#ftp-panel {
+  width: 320px;
+  background: var(--bg-mid);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#ftp-panel.hidden {
+  display: none;
+}
+
+#ftp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#ftp-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#ftp-header button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+/* Saved hosts */
+#ftp-saved-hosts {
+  border-bottom: 1px solid var(--border);
+}
+
+#ftp-saved-header {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#ftp-saved-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.saved-host-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.saved-host-item:hover {
+  background: var(--bg-hover);
+}
+
+.saved-host-item .saved-host-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.saved-host-item .saved-host-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.saved-host-item .saved-host-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-host-item .saved-host-detail {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.saved-host-item .saved-host-delete {
+  visibility: hidden;
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.saved-host-item:hover .saved-host-delete {
+  visibility: visible;
+}
+
+/* Save prompt */
+#ftp-save-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+}
+
+#ftp-save-prompt.hidden {
+  display: none;
+}
+
+#ftp-save-prompt button {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#ftp-save-yes {
+  background: var(--green);
+  color: var(--bg-dark);
+}
+
+#ftp-save-no {
+  background: var(--bg-light);
+  color: var(--text-dim);
+}
+
+#ftp-connect-form {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#ftp-connect-form input[type="text"],
+#ftp-connect-form input[type="password"],
+#ftp-connect-form input[type="number"] {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+#ftp-connect-form label {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#ftp-connect-form button {
+  background: var(--accent);
+  color: var(--bg-dark);
+  border: none;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+#ftp-connect-form button:hover {
+  opacity: 0.9;
+}
+
+#ftp-disconnect-btn {
+  background: var(--red) !important;
+  color: #fff !important;
+}
+
+#ftp-status {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+#ftp-path-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#ftp-path-bar.hidden {
+  display: none;
+}
+
+#ftp-path-bar button {
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#ftp-cwd {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+#ftp-file-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+#ftp-file-list.hidden {
+  display: none;
+}
+
+.ftp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ftp-item:hover {
+  background: var(--bg-hover);
+}
+
+.ftp-item .ftp-icon {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ftp-item .ftp-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ftp-item .ftp-size {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.ftp-item.dir .ftp-icon { color: var(--yellow); }
+.ftp-item.file .ftp-icon { color: var(--text-dim); }
+
+.ftp-item .ftp-delete {
+  visibility: hidden;
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.ftp-item:hover .ftp-delete {
+  visibility: visible;
+}
+
+#ftp-actions {
+  padding: 8px 12px;
+  display: flex;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+}
+
+#ftp-actions.hidden {
+  display: none;
+}
+
+#ftp-actions button {
+  flex: 1;
+  background: var(--bg-light);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#ftp-actions button:hover {
+  background: var(--bg-hover);
+}
+
+/* Nudge modal */
+#nudge-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+#nudge-modal.hidden {
+  display: none;
+}
+
+#nudge-dialog {
+  background: var(--bg-mid);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#nudge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+#nudge-header h3 {
+  font-size: 15px;
+}
+
+#nudge-header button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+#nudge-form {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#nudge-form input[type="text"],
+#nudge-form input[type="number"] {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 100%;
+}
+
+#nudge-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+}
+
+#nudge-options label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
+#nudge-options select {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+#nudge-add-btn {
+  background: var(--green);
+  color: var(--bg-dark);
+  border: none;
+  padding: 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+#nudge-add-btn:hover {
+  opacity: 0.9;
+}
+
+#nudge-list {
+  padding: 8px 16px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+#nudge-list h4 {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.nudge-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-dark);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.nudge-item .nudge-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.nudge-item .nudge-info .nudge-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.nudge-item .nudge-info .nudge-meta {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.nudge-item .nudge-toggle {
+  background: var(--green);
+  color: var(--bg-dark);
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nudge-item .nudge-toggle.paused {
+  background: var(--yellow);
+}
+
+.nudge-item .nudge-remove {
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* Toast notifications */
+#toast-container {
+  position: fixed;
+  top: 50px;
+  right: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--bg-light);
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  max-width: 350px;
+  animation: toast-in 0.3s ease-out, toast-out 0.3s ease-in 4.7s forwards;
+  pointer-events: auto;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateY(-10px); }
+}
+
+.toast .toast-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-dim);
+  border-radius: 3px;
+}
+
+/* Context menu for right-click on FTP items */
+.context-menu {
+  position: fixed;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 0;
+  z-index: 300;
+  min-width: 140px;
+}
+
+.context-menu-item {
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
+}

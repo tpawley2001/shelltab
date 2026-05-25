@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShellTab</title>
+  <link rel="stylesheet" href="xterm.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Top toolbar -->
+  <div id="toolbar">
+    <button id="btn-new-tab" title="New Terminal (Ctrl+T)">+ Terminal</button>
+    <button id="btn-ftp" title="Toggle FTP Panel">FTP</button>
+    <button id="btn-nudges" title="Manage Nudges">Nudges</button>
+  </div>
+
+  <!-- Tab bar -->
+  <div id="tab-bar"></div>
+
+  <!-- Main content area -->
+  <div id="main-content">
+    <!-- FTP sidebar -->
+    <div id="ftp-panel" class="hidden">
+      <div id="ftp-header">
+        <h3>FTP Client</h3>
+        <button id="ftp-close" title="Close">&times;</button>
+      </div>
+      <div id="ftp-saved-hosts">
+        <div id="ftp-saved-header">
+          <span>Saved Hosts</span>
+        </div>
+        <div id="ftp-saved-list"></div>
+      </div>
+      <div id="ftp-connect-form">
+        <input type="text" id="ftp-host" placeholder="Host" value="">
+        <input type="number" id="ftp-port" placeholder="Port" value="21">
+        <input type="text" id="ftp-user" placeholder="Username" value="">
+        <input type="password" id="ftp-pass" placeholder="Password" value="">
+        <label><input type="checkbox" id="ftp-secure"> FTPS</label>
+        <button id="ftp-connect-btn">Connect</button>
+        <button id="ftp-disconnect-btn" class="hidden">Disconnect</button>
+      </div>
+      <div id="ftp-save-prompt" class="hidden">
+        <span>Save this connection?</span>
+        <button id="ftp-save-yes">Save</button>
+        <button id="ftp-save-no">No</button>
+      </div>
+      <div id="ftp-status"></div>
+      <div id="ftp-path-bar" class="hidden">
+        <button id="ftp-up" title="Parent directory">..</button>
+        <span id="ftp-cwd">/</span>
+        <button id="ftp-refresh" title="Refresh">&#8635;</button>
+      </div>
+      <div id="ftp-file-list" class="hidden"></div>
+      <div id="ftp-actions" class="hidden">
+        <button id="ftp-upload-btn">Upload File</button>
+        <button id="ftp-mkdir-btn">New Folder</button>
+      </div>
+    </div>
+
+    <!-- Terminal container -->
+    <div id="terminal-container"></div>
+  </div>
+
+  <!-- Nudge manager modal -->
+  <div id="nudge-modal" class="hidden">
+    <div id="nudge-dialog">
+      <div id="nudge-header">
+        <h3>Nudge Manager</h3>
+        <button id="nudge-close">&times;</button>
+      </div>
+      <div id="nudge-form">
+        <input type="text" id="nudge-text" placeholder="Text to send or display">
+        <div id="nudge-options">
+          <label>Interval (seconds):
+            <input type="number" id="nudge-interval" value="60" min="1">
+          </label>
+          <label>Type:
+            <select id="nudge-type">
+              <option value="terminal">Send to terminal</option>
+              <option value="notification">Overlay notification</option>
+            </select>
+          </label>
+          <label>Target tab:
+            <select id="nudge-target">
+              <option value="active">Active tab</option>
+            </select>
+          </label>
+          <label><input type="checkbox" id="nudge-newline" checked> Append newline (terminal mode)</label>
+        </div>
+        <button id="nudge-add-btn">Add Nudge</button>
+      </div>
+      <div id="nudge-list">
+        <h4>Active Nudges</h4>
+        <div id="nudge-items"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container for notification nudges -->
+  <div id="toast-container"></div>
+
+  <script src="bundle.js"></script>
+</body>
+</html>
