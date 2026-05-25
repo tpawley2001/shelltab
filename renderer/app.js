@@ -73,6 +73,33 @@ async function createTab(title) {
     window.api.sendInput(result.id, data);
   });
 
+  xterm.attachCustomKeyEventHandler((e) => {
+    if (e.type === 'keydown' && e.ctrlKey && e.key === 'v') {
+      navigator.clipboard.readText().then((text) => {
+        if (text) window.api.sendInput(result.id, text);
+      });
+      return false;
+    }
+    if (e.type === 'keydown' && e.ctrlKey && e.key === 'c' && xterm.hasSelection()) {
+      navigator.clipboard.writeText(xterm.getSelection());
+      return false;
+    }
+    return true;
+  });
+
+  wrapper.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (xterm.hasSelection()) {
+      navigator.clipboard.writeText(xterm.getSelection());
+      xterm.clearSelection();
+      showToast('Clipboard', 'Copied selection');
+    } else {
+      navigator.clipboard.readText().then((text) => {
+        if (text) window.api.sendInput(result.id, text);
+      });
+    }
+  });
+
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
   tabEl.dataset.tabId = tabId;
@@ -479,14 +506,38 @@ async function renderSavedHosts() {
 // ── SSH Host Detection ──
 
 const sshHostPerTab = new Map();
+const termDataBuffer = new Map();
+
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+}
 
 function detectSshHost(termId, data) {
   const text = typeof data === 'string' ? data : '';
-  const sshMatch = text.match(/(\w+)@([\w.\-]+)[:\s]/);
-  if (sshMatch) {
+  const buf = (termDataBuffer.get(termId) || '') + text;
+  termDataBuffer.set(termId, buf.slice(-2000));
+
+  const clean = stripAnsi(buf);
+
+  let user = null;
+  let host = null;
+
+  const sshCmd = clean.match(/ssh\s+(?:-[^\s]+\s+)*(?:(\w[\w.-]*)@)?([\w][\w.-]+)/);
+  if (sshCmd) {
+    user = sshCmd[1] || null;
+    host = sshCmd[2];
+  }
+
+  const prompt = clean.match(/(\w[\w.-]*)@([\w][\w.-]+)[:\s~$#]/);
+  if (prompt) {
+    user = prompt[1];
+    host = prompt[2];
+  }
+
+  if (host) {
     for (const [tabId, tab] of tabs) {
       if (tab.termId === termId) {
-        sshHostPerTab.set(tabId, { user: sshMatch[1], host: sshMatch[2] });
+        sshHostPerTab.set(tabId, { user: user || '', host });
         break;
       }
     }
@@ -497,11 +548,9 @@ function prefillFtpFromSsh() {
   if (ftpConnectionId) return;
   const sshInfo = sshHostPerTab.get(activeTabId);
   if (sshInfo) {
-    const hostEl = document.getElementById('ftp-host');
-    const userEl = document.getElementById('ftp-user');
-    if (!hostEl.value) {
-      hostEl.value = sshInfo.host;
-      userEl.value = sshInfo.user;
+    document.getElementById('ftp-host').value = sshInfo.host;
+    if (sshInfo.user) {
+      document.getElementById('ftp-user').value = sshInfo.user;
     }
   }
 }
