@@ -19,6 +19,7 @@ A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser tha
 - Real SSH connections via [ssh2](https://github.com/mscdex/ssh2) — no OpenSSH client, PuTTY or WSL required
 - Authentication by **password**, **private key** (with passphrase), or **SSH agent / Pageant**
 - Interactive prompts for passwords, key passphrases and multi-factor challenges
+- A wrong password re-prompts (up to three tries, like ssh) instead of killing the connection
 - Private keys in `~/.ssh` are discovered automatically, including non-standard names
 - Host keys are verified against a stored `known-hosts.json`; you are warned loudly if one changes
 - Keepalives hold long-lived sessions open; tabs are badged `SSH` and dim when disconnected
@@ -30,6 +31,7 @@ A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser tha
 - Upload, download, rename, delete, `mkdir`, and `chmod` from a right-click menu
 - Multi-select, drag-and-drop upload from the desktop, and live transfer progress
 - Sizes, timestamps and `rwxr-xr-x` permissions for every entry
+- Renames, permission changes and folder creation use an in-app dialog with validation (Electron has no `window.prompt`)
 
 ### Resizable Sidebars
 Both the SFTP browser and the FTP panel have a drag grip on their inner edge.
@@ -41,6 +43,7 @@ Both the SFTP browser and the FTP panel have a drag grip on their inner edge.
 
 ### Built-in FTP Client
 Retained for plain FTP/FTPS servers; see the FTP panel. For anything on port 22, use SSH/SFTP.
+Files delete via `DELE`; empty folders via `RMD` (previously folder deletion always failed).
 
 ### Saved Hosts
 - After a successful FTP connection, ShellTab prompts to save the connection
@@ -161,6 +164,7 @@ shelltab/
     index.html         UI layout
     app.js             Renderer logic (tabs, transports, dialogs, nudges)
     sftp.js            SFTP browser panel
+    dialogs.js         In-app prompt/confirm (Electron has no window.prompt)
     shellint.js        Shell-integration bootstrap (OSC 7 cwd reporting)
     styles.css         Catppuccin Mocha theme
     bundle.js          esbuild output (generated)
@@ -181,6 +185,7 @@ shelltab/
 
 ### Security
 - Renderer runs with `contextIsolation: true` and `nodeIntegration: false`
+- A Content-Security-Policy is set in `index.html`: local assets only, no remote origins
 - All main-process communication goes through a preload script using `contextBridge`
 - Saved passwords are encrypted via `safeStorage` (DPAPI on Windows, libsecret on Linux)
 - SSH host keys are pinned in `known-hosts.json`; a changed key raises a blocking warning
@@ -198,7 +203,7 @@ shelltab/
 | `npm run dist:win` | Build Windows NSIS installer |
 | `npm run dist:linux` | Build Linux AppImage + .deb |
 | `npm run dist:all` | Build for all platforms |
-| `npm run smoketest` | Headless end-to-end test of the SSH/SFTP UI (needs `xvfb` and an sshd on 127.0.0.1) |
+| `npm run smoketest` | Headless end-to-end test of the SSH/SFTP UI (needs `xvfb` and an sshd on 127.0.0.1; the password-retry probe wants the `sttest` user described in `smoketest.js`) |
 
 ## Notes
 

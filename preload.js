@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld('api', {
   ftpDownload: (id, remote, local) => ipcRenderer.invoke('ftp:download', id, remote, local),
   ftpUpload: (id, local, remote) => ipcRenderer.invoke('ftp:upload', id, local, remote),
   ftpMkdir: (id, path) => ipcRenderer.invoke('ftp:mkdir', id, path),
-  ftpDelete: (id, path) => ipcRenderer.invoke('ftp:delete', id, path),
+  ftpDelete: (id, path, isDir) => ipcRenderer.invoke('ftp:delete', id, path, isDir),
   ftpPwd: (id) => ipcRenderer.invoke('ftp:pwd', id),
   ftpDisconnect: (id) => ipcRenderer.invoke('ftp:disconnect', id),
 

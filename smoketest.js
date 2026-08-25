@@ -1,13 +1,31 @@
 // ── Smoke test ──
 // Drives the real UI in a headless window and asserts the SSH + SFTP path
 // works end to end. Requires an sshd on 127.0.0.1 that accepts one of the
-// keys in ~/.ssh. Run with:
+// keys in ~/.ssh. The password-retry probe additionally wants a local user
+// "sttest" with password "sttest-pass" and that same key authorized; without
+// it, that probe reports SKIP rather than FAIL. Set up with:
+//
+//   sudo useradd -m -s /bin/bash sttest
+//   echo 'sttest:sttest-pass' | sudo chpasswd
+//   sudo install -D -m 600 -o sttest ~/.ssh/solar_key.pub ~sttest/.ssh/authorized_keys
+//
+// Run with:
 //
 //   npm run smoketest
 //
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
+function hasTestUser() {
+  try {
+    require('child_process').execSync(
+      'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i ~/.ssh/solar_key sttest@127.0.0.1 true',
+      { timeout: 10000, stdio: 'ignore' }
+    );
+    return true;
+  } catch { return false; }
+}
 
 function run(mainWindow, app) {
   try {
@@ -22,6 +40,7 @@ function run(mainWindow, app) {
   mainWindow.webContents.once('did-finish-load', async () => {
     let passed = 0;
     let failed = 0;
+    let skipped = 0;
     const probe = async (name, expr) => {
       try {
         const r = await mainWindow.webContents.executeJavaScript(expr);
@@ -32,6 +51,10 @@ function run(mainWindow, app) {
         failed++;
         console.log(`FAIL  ${name}  threw: ${err.message}`);
       }
+    };
+    const skip = (name, why) => {
+      skipped++;
+      console.log(`SKIP  ${name}  ${why}`);
     };
     await new Promise((r) => setTimeout(r, 2500));
     await probe('one local tab opened at startup',
@@ -219,9 +242,181 @@ function run(mainWindow, app) {
          return { ok: shown && fields === 1 && secret && failedCleanly, shown, fields, secret, host, failedCleanly };
        })()`);
 
+    if (hasTestUser()) {
+      await probe('wrong password re-prompts instead of killing the connection',
+        `(async () => {
+           document.getElementById('btn-new-ssh').click();
+           await new Promise(r => setTimeout(r, 300));
+           document.getElementById('ssh-host').value = '127.0.0.1';
+           document.getElementById('ssh-user').value = 'sttest';
+           const auth = document.getElementById('ssh-auth');
+           auth.value = 'password'; auth.dispatchEvent(new Event('change'));
+           document.getElementById('ssh-pass').value = '';
+           document.getElementById('ssh-connect-btn').click();
+           await new Promise(r => setTimeout(r, 2500));
+           const modal = document.getElementById('ssh-prompt-modal');
+           const first = modal.querySelector('.prompt-field input');
+           first.value = 'definitely-wrong';
+           document.getElementById('ssh-prompt-ok').click();
+           // Wrong password: the server rejects it and auth should come around
+           // again for a second ask, not fail the whole connection.
+           for (let i = 0; i < 40 && !(!modal.classList.contains('hidden') && modal.querySelector('.prompt-field input')); i++) {
+             await new Promise(r => setTimeout(r, 100));
+           }
+           const reprompted = !modal.classList.contains('hidden') && !!modal.querySelector('.prompt-field input');
+           if (!reprompted) {
+             document.getElementById('ssh-prompt-cancel')?.click();
+             return { ok: false, reprompted };
+           }
+           modal.querySelector('.prompt-field input').value = 'sttest-pass';
+           document.getElementById('ssh-prompt-ok').click();
+           await new Promise(r => setTimeout(r, 5000));
+           const active = document.querySelector('.tab.active');
+           const screen = document.querySelector('.term-wrapper.active').innerText;
+           const connected = active.classList.contains('ssh')
+             && !active.classList.contains('disconnected')
+             && !/Connection failed/.test(screen);
+           return { ok: reprompted && connected, reprompted, connected };
+         })()`);
+    } else {
+      skip('wrong password re-prompts instead of killing the connection', 'no sttest user (see header for setup)');
+    }
+
     await probe('local shell echoes a command',
       `(async () => { const wrap=document.querySelector('.term-wrapper.active'); const before=wrap.innerText.length; window.dispatchEvent(new Event('noop')); return { ok: before > 0, chars: before }; })()`);
-    console.log(`\n${passed}/${passed + failed} checks passed`);
+
+    // ── In-app dialogs (Electron's renderer has no window.prompt) ──
+
+    await probe('in-app prompt resolves with the entered value',
+      `(async () => {
+         const p = window.__testPrompt('New directory name:', { title: 'SFTP — New Folder' });
+         await new Promise(r => setTimeout(r, 200));
+         const modal = document.getElementById('prompt-modal');
+         const shown = !modal.classList.contains('hidden');
+         const input = document.getElementById('prompt-input');
+         input.value = 'test-folder';
+         document.getElementById('prompt-ok').click();
+         const value = await p;
+         return { ok: shown && value === 'test-folder', shown, value };
+       })()`);
+
+    await probe('in-app prompt cancel resolves null and closes',
+      `(async () => {
+         const p = window.__testPrompt('Folder name:');
+         await new Promise(r => setTimeout(r, 150));
+         document.getElementById('prompt-cancel').click();
+         const value = await p;
+         const hidden = document.getElementById('prompt-modal').classList.contains('hidden');
+         return { ok: value === null && hidden, value, hidden };
+       })()`);
+
+    await probe('in-app prompt validates before accepting',
+      `(async () => {
+         const p = window.__testPrompt('Octal permissions:', { validate: (v) => /^[0-7]{3,4}$/.test(v.trim()), error: 'Enter an octal mode like 644.' });
+         await new Promise(r => setTimeout(r, 150));
+         const input = document.getElementById('prompt-input');
+         input.value = 'abc';
+         document.getElementById('prompt-ok').click();
+         await new Promise(r => setTimeout(r, 100));
+         const stillOpen = !document.getElementById('prompt-modal').classList.contains('hidden');
+         const errShown = document.getElementById('prompt-error').textContent.length > 0;
+         input.value = '644';
+         document.getElementById('prompt-ok').click();
+         const value = await p;
+         return { ok: stillOpen && errShown && value === '644', stillOpen, errShown, value };
+       })()`);
+
+    await probe('in-app confirm resolves true on OK and styles the button',
+      `(async () => {
+         const p = window.__testConfirm('Delete this?', { okLabel: 'Delete' });
+         await new Promise(r => setTimeout(r, 150));
+         const modal = document.getElementById('prompt-modal');
+         const confirmStyled = modal.classList.contains('confirm');
+         const label = document.getElementById('prompt-ok').textContent;
+         document.getElementById('prompt-ok').click();
+         const value = await p;
+         return { ok: confirmStyled && label === 'Delete' && value === true, confirmStyled, label, value };
+       })()`);
+
+    await probe('SFTP new-folder dialog opens and mkdir succeeds',
+      `(async () => {
+         // Re-bind the panel to the live SSH tab (the password-fail probe left
+         // a dead tab active), and go somewhere writable.
+         const sshTab = [...document.querySelectorAll('.tab')].find(t => t.classList.contains('ssh') && !t.classList.contains('disconnected'));
+         if (!sshTab) return { ok: false, reason: 'no live ssh tab' };
+         sshTab.click();
+         await new Promise(r => setTimeout(r, 600));
+         document.getElementById('sftp-home').click();
+         await new Promise(r => setTimeout(r, 800));
+         const before = document.querySelectorAll('#sftp-list .sftp-item').length;
+         document.getElementById('sftp-mkdir').click();
+         await new Promise(r => setTimeout(r, 250));
+         const modal = document.getElementById('prompt-modal');
+         const opened = !modal.classList.contains('hidden');
+         const input = document.getElementById('prompt-input');
+         input.value = 'st_smoketest_dir';
+         document.getElementById('prompt-ok').click();
+         await new Promise(r => setTimeout(r, 1500));
+         const appears = [...document.querySelectorAll('#sftp-list .sftp-nm')].some(e => e.textContent === 'st_smoketest_dir');
+         return { ok: opened && appears, opened, before, appears };
+       })()`);
+
+    await probe('SFTP rename through the in-app dialog',
+      `(async () => {
+         const row = [...document.querySelectorAll('#sftp-list .sftp-item')].find(e => e.dataset.name === 'st_smoketest_dir');
+         if (!row) return { ok: false, reason: 'smoketest dir missing' };
+         row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+         await new Promise(r => setTimeout(r, 150));
+         const renameItem = [...document.querySelectorAll('#sftp-menu .ctx-item')].find(e => e.textContent === 'Rename…');
+         if (!renameItem) return { ok: false, reason: 'rename menu item missing' };
+         renameItem.click();
+         await new Promise(r => setTimeout(r, 250));
+         const input = document.getElementById('prompt-input');
+         const prefilled = input.value === 'st_smoketest_dir';
+         input.value = 'st_smoketest_dir2';
+         document.getElementById('prompt-ok').click();
+         await new Promise(r => setTimeout(r, 1500));
+         const renamed = [...document.querySelectorAll('#sftp-list .sftp-nm')].some(e => e.textContent === 'st_smoketest_dir2');
+         return { ok: prefilled && renamed, prefilled, renamed };
+       })()`);
+
+    await probe('SFTP delete confirms in-app and removes the entry',
+      `(async () => {
+         const row = [...document.querySelectorAll('#sftp-list .sftp-item')].find(e => e.dataset.name === 'st_smoketest_dir2');
+         if (!row) return { ok: false, reason: 'renamed dir missing' };
+         row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+         await new Promise(r => setTimeout(r, 150));
+         const deleteItem = [...document.querySelectorAll('#sftp-menu .ctx-item')].find(e => e.textContent === 'Delete');
+         deleteItem.click();
+         await new Promise(r => setTimeout(r, 250));
+         const confirmOpen = !document.getElementById('prompt-modal').classList.contains('hidden');
+         const danger = document.getElementById('prompt-modal').classList.contains('confirm');
+         document.getElementById('prompt-ok').click();
+         await new Promise(r => setTimeout(r, 1500));
+         const gone = ![...document.querySelectorAll('#sftp-list .sftp-nm')].some(e => e.textContent === 'st_smoketest_dir2');
+         return { ok: confirmOpen && danger && gone, confirmOpen, danger, gone };
+       })()`);
+
+    await probe('SFTP permissions dialog rejects a non-octal value',
+      `(async () => {
+         const row = document.querySelector('#sftp-list .sftp-item');
+         if (!row) return { ok: false };
+         row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+         await new Promise(r => setTimeout(r, 150));
+         const permItem = [...document.querySelectorAll('#sftp-menu .ctx-item')].find(e => e.textContent === 'Permissions…');
+         permItem.click();
+         await new Promise(r => setTimeout(r, 250));
+         const input = document.getElementById('prompt-input');
+         const prefilled = /^[0-7]{3,4}$/.test(input.value);
+         input.value = '999';
+         document.getElementById('prompt-ok').click();
+         await new Promise(r => setTimeout(r, 150));
+         const rejected = !document.getElementById('prompt-modal').classList.contains('hidden');
+         document.getElementById('prompt-cancel').click();
+         return { ok: prefilled && rejected, prefilled, rejected };
+       })()`);
+
+    console.log(`\n${passed}/${passed + failed} checks passed${skipped ? ` (${skipped} skipped)` : ''}`);
     app.exit(failed ? 1 : 0);
   });
 }

@@ -1383,6 +1383,38 @@ body {
   color: var(--text-dim);
 }
 
+/* ── In-app prompt/confirm dialog ── */
+
+#prompt-message {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#prompt-input {
+  width: 100%;
+}
+
+#prompt-error {
+  color: var(--red);
+  font-size: 11px;
+  min-height: 14px;
+  margin-top: 4px;
+}
+
+/* Confirm variant: no input, danger styling on the OK button. */
+#prompt-modal.confirm #prompt-ok {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--bg-dark);
+}
+
+#prompt-modal.confirm #prompt-input {
+  display: none;
+}
+
 /* ── Keep-alive + updates ── */
 
 /* A lit toolbar button is the only at-a-glance signal that keep-alive is holding. */

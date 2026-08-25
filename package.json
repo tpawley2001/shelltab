@@ -1,6 +1,6 @@
 {
   "name": "shelltab",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Tabbed terminal with native SSH, an SFTP browser, FTP and timed nudges",
   "main": "main.js",
   "scripts": {
@@ -26,6 +26,7 @@
       "!renderer/app.js",
       "!renderer/sftp.js",
       "!renderer/shellint.js",
+      "!renderer/dialogs.js",
       "node_modules/**/*",
       "!node_modules/cpu-features/**/*",
       "!node_modules/nan/**/*"

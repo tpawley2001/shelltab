@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Everything here is local: no remote scripts, styles, or connections. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'">
   <title>ShellTab</title>
   <link rel="stylesheet" href="xterm.css">
   <link rel="stylesheet" href="styles.css">
@@ -301,6 +304,25 @@
           <button id="update-check-btn">Check Now</button>
           <button id="update-download-btn" class="hidden">Download</button>
           <button id="update-install-btn" class="hidden">Restart &amp; Install</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-app prompt/confirm: Electron doesn't implement window.prompt(), and
+       confirm() pops a native box that blocks every terminal while open. -->
+  <div id="prompt-modal" class="modal hidden">
+    <div class="modal-dialog small">
+      <div class="modal-header">
+        <h3 id="prompt-title">Input</h3>
+      </div>
+      <div class="modal-body">
+        <div id="prompt-message"></div>
+        <input type="text" id="prompt-input" spellcheck="false">
+        <div id="prompt-error"></div>
+        <div class="modal-buttons">
+          <button id="prompt-ok">OK</button>
+          <button id="prompt-cancel">Cancel</button>
         </div>
       </div>
     </div>

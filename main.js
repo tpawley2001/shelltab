@@ -21,6 +21,7 @@ function createWindow() {
     return null;
   })();
   const bounds = saved?.windowBounds || { width: 1200, height: 800 };
+  const maximized = !!saved?.windowMaximized;
 
   mainWindow = new BrowserWindow({
     ...bounds,
@@ -32,7 +33,11 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  if (maximized) mainWindow.maximize();
+  // In selftest mode the page loads with ?selftest=1 so renderer modules can
+  // expose test hooks before any probe runs (see dialogs.js).
+  const loadOpts = process.env.SHELLTAB_SELFTEST ? { query: { selftest: '1' } } : undefined;
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'), loadOpts);
   mainWindow.setMenuBarVisibility(false);
 
   // SHELLTAB_DEBUG=1 surfaces renderer console output in the terminal.
@@ -47,11 +52,34 @@ function createWindow() {
 
   if (process.env.SHELLTAB_SELFTEST) require('./smoketest').run(mainWindow, app);
 
+  // Persist geometry continuously (debounced), not just on close: a crash,
+  // kill or power loss would otherwise restore the last *clean* exit's size.
+  let saveBoundsTimer = null;
+  const saveBounds = () => {
+    if (saveBoundsTimer) return;
+    saveBoundsTimer = setTimeout(() => {
+      saveBoundsTimer = null;
+      try {
+        const sf = path.join(app.getPath('userData'), 'app-state.json');
+        const current = fs.existsSync(sf) ? JSON.parse(fs.readFileSync(sf, 'utf-8')) : {};
+        current.windowBounds = mainWindow.getNormalBounds(); // size ignoring maximize
+        current.windowMaximized = mainWindow.isMaximized();
+        fs.writeFileSync(sf, JSON.stringify(current, null, 2));
+      } catch {}
+    }, 800);
+  };
+  mainWindow.on('resize', saveBounds);
+  mainWindow.on('move', saveBounds);
+  mainWindow.on('maximize', saveBounds);
+  mainWindow.on('unmaximize', saveBounds);
+
   mainWindow.on('close', () => {
+    if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
     try {
       const sf = path.join(app.getPath('userData'), 'app-state.json');
       const current = fs.existsSync(sf) ? JSON.parse(fs.readFileSync(sf, 'utf-8')) : {};
-      current.windowBounds = mainWindow.getBounds();
+      current.windowBounds = mainWindow.getNormalBounds();
+      current.windowMaximized = mainWindow.isMaximized();
       fs.writeFileSync(sf, JSON.stringify(current, null, 2));
     } catch {}
   });
@@ -207,11 +235,13 @@ ipcMain.handle('ftp:mkdir', async (event, id, remotePath) => {
   }
 });
 
-ipcMain.handle('ftp:delete', async (event, id, remotePath) => {
+ipcMain.handle('ftp:delete', async (event, id, remotePath, isDir) => {
   const client = ftpClients.get(id);
   if (!client) return { error: 'Not connected' };
   try {
-    await client.remove(remotePath);
+    // DELE only deletes files; an empty directory needs RMD.
+    if (isDir) await client.removeEmptyDir(remotePath);
+    else await client.remove(remotePath);
     return { success: true };
   } catch (err) {
     return { error: err.message };

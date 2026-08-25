@@ -168,21 +168,46 @@ function register(getWindow) {
     if (agent) methods.push('agent');
     if (privateKey) methods.push('publickey');
     methods.push('password', 'keyboard-interactive');
-    let methodIndex = 0;
+
+    // Methods actually sent to the server this session. A method only counts
+    // as sent once its callback fires — a cancelled prompt must not burn it.
+    const sent = new Set();
 
     // ssh2 calls this as (methodsLeft, partialSuccess, callback); both of the
-    // first two are null on the first attempt.
+    // first two are null on the first attempt. Each call picks the next
+    // untried method the server still allows.
+    let passwordAttempts = 0;
+    let passwordSent = false; // a password actually went to the server
     const authHandler = (methodsLeft, partialSuccess, callback) => {
-      const next = async () => {
-        while (methodIndex < methods.length) {
-          const method = methods[methodIndex++];
-          if (methodsLeft && methodsLeft.length && method !== 'none' && !methodsLeft.includes(method)) continue;
+      // A new round after a password was sent means it was rejected. Forget it
+      // so the user is asked again instead of the whole connection dying on
+      // one typo (max 3 tries, like ssh). Only an actually-sent password
+      // counts — a cancelled prompt must still burn the method and fail
+      // cleanly.
+      if (passwordSent) {
+        password = null; // never auto-reuse a password the server saw rejected
+        passwordSent = false;
+        if (++passwordAttempts < 3 && (!methodsLeft || !methodsLeft.length || methodsLeft.includes('password'))) {
+          sent.delete('password');
+        }
+      }
 
-          if (method === 'none') return callback({ type: 'none', username });
-          if (method === 'agent') return callback({ type: 'agent', username, agent });
+      const allowed = (m) => !methodsLeft || !methodsLeft.length || m === 'none' || methodsLeft.includes(m);
+
+      const next = async () => {
+        while (true) {
+          const method = methods.find((m) => !sent.has(m) && allowed(m));
+          if (!method) return callback(false);
+          sent.add(method); // picked — a cancelled prompt burns it, as before
+
+          if (method === 'none') {
+            return callback({ type: 'none', username });
+          }
+          if (method === 'agent') {
+            return callback({ type: 'agent', username, agent });
+          }
 
           if (method === 'publickey') {
-            if (!privateKey) continue;
             // Encrypted key with no passphrase yet → ask.
             if (!passphrase && /ENCRYPTED|bcrypt/i.test(privateKey.toString('utf-8').slice(0, 400))) {
               const answers = await askRenderer(win, {
@@ -208,6 +233,7 @@ function register(getWindow) {
               password = answers.answers[0];
               if (answers.save) session.offerSavePassword = password;
             }
+            passwordSent = true;
             return callback({ type: 'password', username, password });
           }
 
@@ -229,7 +255,6 @@ function register(getWindow) {
             });
           }
         }
-        return callback(false);
       };
       next();
     };

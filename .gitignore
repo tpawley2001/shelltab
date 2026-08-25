@@ -3,3 +3,4 @@ dist/
 renderer/bundle.js
 renderer/xterm.css
 *.blockmap
+bundle.js

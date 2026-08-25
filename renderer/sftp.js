@@ -2,6 +2,8 @@
 // One panel, one state bucket per live SSH session. Mirrors MobaXterm's
 // behaviour: the browser follows whatever directory the terminal is sitting in.
 
+const dialogs = require('./dialogs');
+
 const panel = () => document.getElementById('sftp-panel');
 const listEl = () => document.getElementById('sftp-list');
 const cwdEl = () => document.getElementById('sftp-cwd');
@@ -9,6 +11,7 @@ const menuEl = () => document.getElementById('sftp-menu');
 
 const sessions = new Map(); // sshId -> { cwd, home, label, entries, selection }
 let activeId = null;
+let navSeq = 0; // guards against a slow listing overwriting a faster newer one
 let showToast = () => {};
 let onLayoutChange = () => {};
 
@@ -139,7 +142,10 @@ async function navigate(sshId, remotePath, force) {
   const st = state(sshId);
   if (!force && st.cwd === remotePath && st.entries.length) return;
 
+  const seq = ++navSeq;
   const items = await window.api.sftpList(sshId, remotePath);
+  if (seq !== navSeq) return; // a newer navigation superseded this one
+
   if (items?.error) {
     showToast('SFTP', items.error);
     if (activeId === sshId) {
@@ -294,27 +300,39 @@ function showMenu(x, y, sshId, item) {
       ? { label: 'Open', fn: () => navigate(sshId, posixJoin(st.cwd, item.name), true) }
       : { label: 'Download…', fn: () => downloadSelected(sshId) },
     { label: 'Rename…', fn: async () => {
-      const next = prompt(`Rename "${item.name}" to:`, item.name);
+      const next = await dialogs.appPrompt(`Rename "${item.name}" to:`, {
+        title: 'SFTP — Rename',
+        value: item.name,
+        select: true,
+      });
       if (!next || next === item.name) return;
       const res = await window.api.sftpRename(sshId, posixJoin(st.cwd, item.name), posixJoin(st.cwd, next));
       if (res?.error) showToast('SFTP', res.error); else refresh();
     } },
     { label: 'Permissions…', fn: async () => {
       const current = (item.mode || 0).toString(8).padStart(4, '0');
-      const next = prompt(`Octal permissions for "${item.name}":`, current);
+      const next = await dialogs.appPrompt(`Octal permissions for "${item.name}":`, {
+        title: 'SFTP — Permissions',
+        value: current,
+        validate: (v) => /^[0-7]{3,4}$/.test(v.trim()),
+        error: 'Enter an octal mode like 644 or 0755.',
+      });
       if (!next) return;
-      const mode = parseInt(next, 8);
-      if (Number.isNaN(mode)) return showToast('SFTP', 'Not a valid octal mode.');
+      const mode = parseInt(next.trim(), 8);
       const res = await window.api.sftpChmod(sshId, posixJoin(st.cwd, item.name), mode);
       if (res?.error) showToast('SFTP', res.error); else refresh();
     } },
     { label: 'Copy path', fn: () => {
-      navigator.clipboard.writeText(posixJoin(st.cwd, item.name));
+      navigator.clipboard.writeText(posixJoin(st.cwd, item.name)).catch(() => {});
       showToast('Clipboard', 'Remote path copied');
     } },
     { label: 'Delete', danger: true, fn: async () => {
       const names = [...st.selection];
-      if (!confirm(`Delete ${names.length > 1 ? `${names.length} items` : `"${item.name}"`}?`)) return;
+      const okDelete = await dialogs.appConfirm(
+        names.length > 1 ? `Delete ${names.length} items?` : `Delete "${item.name}"?`,
+        { title: 'SFTP — Delete', okLabel: 'Delete' }
+      );
+      if (!okDelete) return;
       for (const name of names) {
         const entry = st.entries.find((e) => e.name === name);
         const res = await window.api.sftpDelete(sshId, posixJoin(st.cwd, name), entry?.type === 'dir');
@@ -376,7 +394,7 @@ function init(opts = {}) {
 
   document.getElementById('sftp-mkdir').addEventListener('click', async () => {
     if (activeId == null) return;
-    const name = prompt('New directory name:');
+    const name = await dialogs.appPrompt('New directory name:', { title: 'SFTP — New Folder' });
     if (!name) return;
     const st = state(activeId);
     const res = await window.api.sftpMkdir(activeId, posixJoin(st.cwd, name));

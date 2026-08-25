@@ -2,6 +2,7 @@ const { Terminal } = require('@xterm/xterm');
 const { FitAddon } = require('@xterm/addon-fit');
 const { WebLinksAddon } = require('@xterm/addon-web-links');
 const sftp = require('./sftp');
+const dialogs = require('./dialogs');
 
 // ── State ──
 const tabs = new Map();
@@ -176,11 +177,11 @@ async function createTab(opts = {}) {
       return false;
     }
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') {
-      navigator.clipboard.readText().then((text) => text && tabSend(tab, text));
+      navigator.clipboard.readText().then((text) => text && tabSend(tab, text)).catch(() => {});
       return false;
     }
     if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
-      navigator.clipboard.readText().then((text) => text && tabSend(tab, text));
+      navigator.clipboard.readText().then((text) => text && tabSend(tab, text)).catch(() => {});
       return false;
     }
     if (e.ctrlKey && !e.shiftKey && e.key === 'c' && xterm.hasSelection()) {
@@ -197,7 +198,7 @@ async function createTab(opts = {}) {
       xterm.clearSelection();
       showToast('Clipboard', 'Copied selection');
     } else {
-      navigator.clipboard.readText().then((text) => text && tabSend(tab, text));
+      navigator.clipboard.readText().then((text) => text && tabSend(tab, text)).catch(() => {});
     }
   });
 
@@ -628,8 +629,8 @@ async function ftpNavigate(remotePath) {
       const remoteFull = ftpCurrentPath === '/'
         ? `/${item.name}`
         : `${ftpCurrentPath}/${item.name}`;
-      if (confirm(`Delete ${item.name}?`)) {
-        const result = await window.api.ftpDelete(ftpConnectionId, remoteFull);
+      if (await dialogs.appConfirm(`Delete ${item.name}?`, { title: 'FTP', okLabel: 'Delete' })) {
+        const result = await window.api.ftpDelete(ftpConnectionId, remoteFull, item.type === 'dir');
         if (result.error) {
           showToast('FTP Error', result.error);
         } else {
@@ -670,7 +671,7 @@ document.getElementById('ftp-upload-btn').addEventListener('click', async () => 
 });
 
 document.getElementById('ftp-mkdir-btn').addEventListener('click', async () => {
-  const name = prompt('Folder name:');
+  const name = await dialogs.appPrompt('Folder name:', { title: 'FTP — New Folder' });
   if (!name) return;
   const remoteFull = ftpCurrentPath === '/'
     ? `/${name}`
@@ -1226,6 +1227,8 @@ function showToast(title, message) {
   container.appendChild(el);
   setTimeout(() => el.remove(), 5000);
 }
+
+dialogs.init();
 
 function escapeHtml(str) {
   const div = document.createElement('div');
