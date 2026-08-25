@@ -10,9 +10,23 @@
 <body>
   <!-- Top toolbar -->
   <div id="toolbar">
-    <button id="btn-new-tab" title="New Terminal (Ctrl+T)">+ Terminal</button>
+    <button id="btn-new-tab" title="New Terminal (Ctrl+Shift+T)">+ Terminal</button>
+    <button id="btn-new-ssh" title="New SSH Session (Ctrl+Shift+S)">+ SSH</button>
+    <button id="btn-sftp" title="Toggle SFTP browser for the active SSH session">Files</button>
     <button id="btn-ftp" title="Toggle FTP Panel">FTP</button>
+    <div id="quicklinks-wrap">
+      <button id="btn-quicklinks" title="Saved Connections">Quicklinks</button>
+      <div id="quicklinks-dropdown" class="hidden">
+        <div id="quicklinks-list"></div>
+        <div id="quicklinks-actions">
+          <button id="quicklinks-add-ssh">+ SSH</button>
+          <button id="quicklinks-add-other">+ FTP / Command</button>
+        </div>
+      </div>
+    </div>
     <button id="btn-nudges" title="Manage Nudges">Nudges</button>
+    <button id="btn-keepalive" title="Keep sessions alive and this PC awake">Keep-Alive</button>
+    <button id="btn-update" title="Check for a new version of ShellTab">Update</button>
   </div>
 
   <!-- Tab bar -->
@@ -20,6 +34,35 @@
 
   <!-- Main content area -->
   <div id="main-content">
+    <!-- SFTP browser: rides the active SSH session -->
+    <div id="sftp-panel" class="hidden">
+      <div id="sftp-header">
+        <h3 id="sftp-title">SFTP</h3>
+        <label id="sftp-follow-wrap" title="Keep the browser on the terminal's current directory">
+          <input type="checkbox" id="sftp-follow" checked> follow
+        </label>
+        <button id="sftp-close" title="Close">&times;</button>
+      </div>
+      <div id="sftp-path-bar">
+        <button id="sftp-up" title="Parent directory">&#8593;</button>
+        <button id="sftp-home" title="Home directory">&#8962;</button>
+        <input type="text" id="sftp-cwd" spellcheck="false" title="Remote path — type one and press Enter">
+        <button id="sftp-refresh" title="Refresh">&#8635;</button>
+      </div>
+      <div id="sftp-list"></div>
+      <div id="sftp-transfer" class="hidden">
+        <div id="sftp-transfer-label"></div>
+        <div id="sftp-bar"><div id="sftp-bar-fill"></div></div>
+      </div>
+      <div id="sftp-actions">
+        <button id="sftp-upload" title="Upload files into this directory">Upload</button>
+        <button id="sftp-download" title="Download selected">Download</button>
+        <button id="sftp-mkdir" title="Create a directory">New Folder</button>
+      </div>
+      <div id="sftp-empty">Connect an SSH session to browse its files.</div>
+    </div>
+    <div id="sftp-menu" class="ctx-menu hidden"></div>
+
     <!-- FTP sidebar -->
     <div id="ftp-panel" class="hidden">
       <div id="ftp-header">
@@ -63,6 +106,66 @@
     <div id="terminal-container"></div>
   </div>
 
+  <!-- New SSH session modal -->
+  <div id="ssh-modal" class="modal hidden">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="ssh-modal-title">New SSH Session</h3>
+        <button id="ssh-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-row">
+          <input type="text" id="ssh-host" placeholder="Host / IP" spellcheck="false">
+          <input type="number" id="ssh-port" placeholder="Port" value="22">
+        </div>
+        <input type="text" id="ssh-user" placeholder="Username" spellcheck="false">
+        <label class="field-label">Authentication
+          <select id="ssh-auth">
+            <option value="password">Password</option>
+            <option value="key">Private key</option>
+            <option value="agent">SSH agent / Pageant</option>
+          </select>
+        </label>
+        <input type="password" id="ssh-pass" placeholder="Password (leave blank to be asked)">
+        <div class="field-row" id="ssh-key-row">
+          <input type="text" id="ssh-key" placeholder="Path to private key" spellcheck="false" list="ssh-key-list">
+          <datalist id="ssh-key-list"></datalist>
+          <button id="ssh-key-browse" class="btn-slim">Browse</button>
+        </div>
+        <input type="password" id="ssh-passphrase" placeholder="Key passphrase (leave blank to be asked)">
+        <label class="check"><input type="checkbox" id="ssh-shellint" checked> Shell integration &mdash; SFTP follows the terminal's directory</label>
+        <label class="check"><input type="checkbox" id="ssh-save"> Save as Quicklink</label>
+        <input type="text" id="ssh-label" placeholder="Quicklink label" class="hidden">
+        <div id="ssh-modal-error"></div>
+        <div class="modal-buttons">
+          <button id="ssh-connect-btn">Connect</button>
+          <button id="ssh-cancel-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SSH authentication prompt (password / passphrase / 2FA) -->
+  <div id="ssh-prompt-modal" class="modal hidden">
+    <div class="modal-dialog small">
+      <div class="modal-header">
+        <h3 id="ssh-prompt-title">Authentication</h3>
+      </div>
+      <div class="modal-body">
+        <div id="ssh-prompt-host"></div>
+        <div id="ssh-prompt-instructions"></div>
+        <div id="ssh-prompt-fields"></div>
+        <label class="check hidden" id="ssh-prompt-save-wrap">
+          <input type="checkbox" id="ssh-prompt-save"> Save this password to the Quicklink
+        </label>
+        <div class="modal-buttons">
+          <button id="ssh-prompt-ok">OK</button>
+          <button id="ssh-prompt-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Nudge manager modal -->
   <div id="nudge-modal" class="hidden">
     <div id="nudge-dialog">
@@ -94,6 +197,109 @@
       <div id="nudge-list">
         <h4>Active Nudges</h4>
         <div id="nudge-items"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save quicklink modal -->
+  <div id="save-conn-modal" class="hidden">
+    <div id="save-conn-dialog">
+      <div id="save-conn-header">
+        <h3>Save Quicklink</h3>
+        <button id="save-conn-close">&times;</button>
+      </div>
+      <div id="save-conn-form">
+        <input type="text" id="save-conn-label" placeholder="Label (e.g. My Server)">
+        <div id="save-conn-row">
+          <select id="save-conn-type">
+            <option value="ftp">FTP</option>
+            <option value="command">Command</option>
+          </select>
+          <input type="text" id="save-conn-host" placeholder="Host / IP">
+          <input type="number" id="save-conn-port" placeholder="Port" value="22">
+        </div>
+        <input type="text" id="save-conn-user" placeholder="Username">
+        <input type="password" id="save-conn-pass" placeholder="Password">
+        <input type="text" id="save-conn-command" placeholder="Command (e.g. claude -dangerous)" class="hidden">
+        <div id="save-conn-buttons">
+          <button id="save-conn-save">Save</button>
+          <button id="save-conn-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keep-alive settings -->
+  <div id="keepalive-modal" class="modal hidden">
+    <div class="modal-dialog small">
+      <div class="modal-header">
+        <h3>Keep-Alive</h3>
+        <button id="keepalive-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="check"><input type="checkbox" id="ka-enabled"> Keep-alive on</label>
+
+        <div class="ka-group">
+          <label class="check"><input type="checkbox" id="ka-awake"> Keep this PC awake &mdash; same hold a video player takes, so Windows never idles out</label>
+          <label class="field-label">While awake
+            <select id="ka-mode">
+              <option value="display">Screen and system stay on</option>
+              <option value="system">System only &mdash; let the screen sleep</option>
+            </select>
+          </label>
+          <div id="ka-awake-state" class="ka-hint"></div>
+        </div>
+
+        <div class="ka-group">
+          <label class="field-label">SSH keepalive every
+            <input type="number" id="ka-ssh-interval" min="0" max="3600" step="5"> seconds (0 = off)
+          </label>
+          <div class="ka-hint">Applies to sessions opened from now on.</div>
+        </div>
+
+        <div class="ka-group">
+          <label class="check"><input type="checkbox" id="ka-antiidle"> Anti-idle &mdash; send an invisible byte into the session</label>
+          <label class="field-label">Every
+            <input type="number" id="ka-antiidle-secs" min="10" max="3600" step="10"> seconds
+          </label>
+          <div class="ka-hint">For servers that only count terminal traffic. Takes effect immediately.</div>
+        </div>
+
+        <div class="modal-buttons">
+          <button id="keepalive-done">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Remote update -->
+  <div id="update-modal" class="modal hidden">
+    <div class="modal-dialog small">
+      <div class="modal-header">
+        <h3>ShellTab Updates</h3>
+        <button id="update-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="update-version"></div>
+        <label class="field-label">Update source
+          <select id="update-source">
+            <option value="github">GitHub Releases</option>
+            <option value="url">Local server / Tailscale</option>
+          </select>
+        </label>
+        <input type="text" id="update-url" class="hidden" spellcheck="false"
+               placeholder="http://host:port/shelltab/">
+        <div id="update-url-hint" class="ka-hint hidden">
+          Directory holding <code>latest.yml</code> and the installer. A Tailscale
+          name or LAN IP both work.
+        </div>
+        <div id="update-status"></div>
+        <div id="update-progress" class="hidden"><div id="update-bar-fill"></div></div>
+        <div class="modal-buttons">
+          <button id="update-check-btn">Check Now</button>
+          <button id="update-download-btn" class="hidden">Download</button>
+          <button id="update-install-btn" class="hidden">Restart &amp; Install</button>
+        </div>
       </div>
     </div>
   </div>

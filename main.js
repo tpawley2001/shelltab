@@ -4,15 +4,26 @@ const pty = require('node-pty');
 const ftp = require('basic-ftp');
 const fs = require('fs');
 const os = require('os');
+const sshManager = require('./sshmanager');
+const keepAlive = require('./keepalive');
+const updater = require('./updater');
 
 let mainWindow;
 const terminals = new Map();
 let nextTermId = 1;
 
 function createWindow() {
+  const saved = (() => {
+    try {
+      const sf = path.join(app.getPath('userData'), 'app-state.json');
+      if (fs.existsSync(sf)) return JSON.parse(fs.readFileSync(sf, 'utf-8'));
+    } catch {}
+    return null;
+  })();
+  const bounds = saved?.windowBounds || { width: 1200, height: 800 };
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    ...bounds,
     title: 'ShellTab',
     icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
@@ -23,11 +34,39 @@ function createWindow() {
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.setMenuBarVisibility(false);
+
+  // SHELLTAB_DEBUG=1 surfaces renderer console output in the terminal.
+  if (process.env.SHELLTAB_DEBUG) {
+    mainWindow.webContents.on('console-message', (e, level, message, line, source) => {
+      console.log(`[renderer:${level}] ${message} (${source}:${line})`);
+    });
+    mainWindow.webContents.on('render-process-gone', (e, details) => {
+      console.log('[renderer gone]', JSON.stringify(details));
+    });
+  }
+
+  if (process.env.SHELLTAB_SELFTEST) require('./smoketest').run(mainWindow, app);
+
+  mainWindow.on('close', () => {
+    try {
+      const sf = path.join(app.getPath('userData'), 'app-state.json');
+      const current = fs.existsSync(sf) ? JSON.parse(fs.readFileSync(sf, 'utf-8')) : {};
+      current.windowBounds = mainWindow.getBounds();
+      fs.writeFileSync(sf, JSON.stringify(current, null, 2));
+    } catch {}
+  });
 }
 
-app.whenReady().then(createWindow);
+const ssh = sshManager.register(() => mainWindow);
+
+app.whenReady().then(() => {
+  keepAlive.register();
+  createWindow();
+  updater.register(() => mainWindow);
+});
 app.on('window-all-closed', () => {
   for (const [, term] of terminals) term.kill();
+  ssh.killAll();
   app.quit();
 });
 
@@ -95,12 +134,18 @@ let nextFtpId = 1;
 
 ipcMain.handle('ftp:connect', async (event, config) => {
   const id = nextFtpId++;
+  const port = config.port || 21;
+
+  if (port === 22) {
+    return { id: null, status: 'error', message: 'Port 22 is SSH/SFTP — this client supports FTP only. Use port 21 for FTP or enable FTPS.' };
+  }
+
   const client = new ftp.Client();
-  client.ftp.verbose = false;
+  client.ftp.verbose = true;
   try {
     await client.access({
       host: config.host,
-      port: config.port || 21,
+      port,
       user: config.user || 'anonymous',
       password: config.password || '',
       secure: config.secure || false,
@@ -108,6 +153,7 @@ ipcMain.handle('ftp:connect', async (event, config) => {
     ftpClients.set(id, client);
     return { id, status: 'connected' };
   } catch (err) {
+    client.close();
     return { id: null, status: 'error', message: err.message };
   }
 });
@@ -201,11 +247,59 @@ ipcMain.handle('dialog:saveFile', async (event, defaultName) => {
   return result.canceled ? null : result.filePath;
 });
 
-ipcMain.handle('dialog:openFile', async () => {
+ipcMain.handle('dialog:openFile', async (event, opts = {}) => {
+  const properties = ['openFile'];
+  if (opts.multi) properties.push('multiSelections');
+  const result = await dialog.showOpenDialog(mainWindow, { properties });
+  if (result.canceled) return null;
+  return opts.multi ? result.filePaths : result.filePaths[0];
+});
+
+ipcMain.handle('dialog:openDirectory', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile'],
+    title: 'Choose download folder',
+    defaultPath: os.homedir(),
+    properties: ['openDirectory', 'createDirectory'],
   });
   return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('dialog:openKey', async () => {
+  const sshDir = path.join(os.homedir(), '.ssh');
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select private key',
+    defaultPath: fs.existsSync(sshDir) ? sshDir : os.homedir(),
+    properties: ['openFile', 'showHiddenFiles'],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+// Offer the private keys in ~/.ssh. A private key is any file with a matching
+// .pub sibling, which catches non-standard names (solar_key, work_ed25519, …)
+// that a fixed id_rsa/id_ed25519 list would miss. Standard names sort first.
+ipcMain.handle('ssh:findKeys', () => {
+  const sshDir = path.join(os.homedir(), '.ssh');
+  const preferred = ['id_ed25519', 'id_ecdsa', 'id_rsa', 'id_dsa'];
+  try {
+    const entries = fs.readdirSync(sshDir);
+    const pubs = new Set(entries.filter((f) => f.endsWith('.pub')).map((f) => f.slice(0, -4)));
+    const keys = entries.filter((f) => {
+      if (f.endsWith('.pub') || !pubs.has(f)) return false;
+      try { return fs.statSync(path.join(sshDir, f)).isFile(); } catch { return false; }
+    });
+    keys.sort((a, b) => {
+      const ai = preferred.indexOf(a), bi = preferred.indexOf(b);
+      if (ai !== bi) return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+      return a.localeCompare(b);
+    });
+    return keys.map((f) => path.join(sshDir, f));
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle('ssh:defaultUser', () => {
+  try { return os.userInfo().username; } catch { return ''; }
 });
 
 // ── Saved hosts (passwords encrypted via OS keychain) ──
@@ -217,12 +311,21 @@ function loadHosts() {
     if (!fs.existsSync(hostsFile)) return [];
     const raw = JSON.parse(fs.readFileSync(hostsFile, 'utf-8'));
     return raw.map((h) => {
-      if (h.encryptedPassword && safeStorage.isEncryptionAvailable()) {
-        try {
-          h.password = safeStorage.decryptString(Buffer.from(h.encryptedPassword, 'base64'));
-        } catch { h.password = ''; }
+      if (h.encryptedPassword) {
+        if (h.safeStorageEncrypted && safeStorage.isEncryptionAvailable()) {
+          try {
+            h.password = safeStorage.decryptString(Buffer.from(h.encryptedPassword, 'base64'));
+          } catch { h.password = ''; }
+        } else if (!h.safeStorageEncrypted) {
+          try {
+            h.password = Buffer.from(h.encryptedPassword, 'base64').toString('utf-8');
+          } catch { h.password = ''; }
+        } else {
+          h.password = '';
+        }
       }
       delete h.encryptedPassword;
+      delete h.safeStorageEncrypted;
       return h;
     });
   } catch { return []; }
@@ -232,9 +335,16 @@ function saveHosts(hosts) {
   const toStore = hosts.map((h) => {
     const entry = { ...h };
     if (entry.password && safeStorage.isEncryptionAvailable()) {
-      entry.encryptedPassword = safeStorage.encryptString(entry.password).toString('base64');
+      try {
+        entry.encryptedPassword = safeStorage.encryptString(entry.password).toString('base64');
+        entry.safeStorageEncrypted = true;
+      } catch {
+        entry.encryptedPassword = Buffer.from(entry.password).toString('base64');
+        entry.safeStorageEncrypted = false;
+      }
     } else if (entry.password) {
       entry.encryptedPassword = Buffer.from(entry.password).toString('base64');
+      entry.safeStorageEncrypted = false;
     }
     delete entry.password;
     return entry;
@@ -257,21 +367,130 @@ ipcMain.handle('hosts:get', (event, hostKey) => {
 });
 
 ipcMain.handle('hosts:save', (event, hostData) => {
-  const hosts = loadHosts();
-  const key = `${hostData.host}:${hostData.port || 21}:${hostData.user || 'anonymous'}`;
-  const existing = hosts.findIndex((h) => h.key === key);
-  const entry = { key, ...hostData };
-  if (existing >= 0) {
-    hosts[existing] = entry;
-  } else {
-    hosts.push(entry);
+  try {
+    const hosts = loadHosts();
+    const key = `${hostData.host}:${hostData.port || 21}:${hostData.user || 'anonymous'}`;
+    const existing = hosts.findIndex((h) => h.key === key);
+    const entry = { key, ...hostData };
+    if (existing >= 0) {
+      hosts[existing] = entry;
+    } else {
+      hosts.push(entry);
+    }
+    saveHosts(hosts);
+    return { success: true, key };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
-  saveHosts(hosts);
-  return { success: true, key };
 });
 
 ipcMain.handle('hosts:delete', (event, hostKey) => {
   const hosts = loadHosts().filter((h) => h.key !== hostKey);
   saveHosts(hosts);
+  return { success: true };
+});
+
+// ── Quicklinks ──
+
+const quicklinksFile = path.join(app.getPath('userData'), 'quicklinks.json');
+
+function loadQuicklinks() {
+  try {
+    if (!fs.existsSync(quicklinksFile)) return [];
+    const raw = JSON.parse(fs.readFileSync(quicklinksFile, 'utf-8'));
+    return raw.map((q) => {
+      if (q.encryptedPassword) {
+        if (q.safeStorageEncrypted && safeStorage.isEncryptionAvailable()) {
+          try {
+            q.password = safeStorage.decryptString(Buffer.from(q.encryptedPassword, 'base64'));
+          } catch { q.password = ''; }
+        } else if (!q.safeStorageEncrypted) {
+          try {
+            q.password = Buffer.from(q.encryptedPassword, 'base64').toString('utf-8');
+          } catch { q.password = ''; }
+        } else {
+          q.password = '';
+        }
+      }
+      delete q.encryptedPassword;
+      delete q.safeStorageEncrypted;
+      return q;
+    });
+  } catch { return []; }
+}
+
+function saveQuicklinks(links) {
+  const toStore = links.map((q) => {
+    const entry = { ...q };
+    if (entry.password && safeStorage.isEncryptionAvailable()) {
+      try {
+        entry.encryptedPassword = safeStorage.encryptString(entry.password).toString('base64');
+        entry.safeStorageEncrypted = true;
+      } catch {
+        entry.encryptedPassword = Buffer.from(entry.password).toString('base64');
+        entry.safeStorageEncrypted = false;
+      }
+    } else if (entry.password) {
+      entry.encryptedPassword = Buffer.from(entry.password).toString('base64');
+      entry.safeStorageEncrypted = false;
+    }
+    delete entry.password;
+    return entry;
+  });
+  fs.writeFileSync(quicklinksFile, JSON.stringify(toStore, null, 2));
+}
+
+ipcMain.handle('quicklinks:list', () => loadQuicklinks());
+
+ipcMain.handle('quicklinks:get', (event, id) => {
+  return loadQuicklinks().find((q) => q.id === id) || null;
+});
+
+ipcMain.handle('quicklinks:save', (event, data) => {
+  try {
+    const links = loadQuicklinks();
+    const id = data.id || `${data.type || 'ssh'}:${data.host}:${data.user || ''}:${Date.now()}`;
+    const existing = links.findIndex((q) => q.id === id);
+    const entry = { ...data, id };
+    if (existing >= 0) {
+      links[existing] = entry;
+    } else {
+      links.push(entry);
+    }
+    saveQuicklinks(links);
+    return { success: true, id };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('quicklinks:delete', (event, id) => {
+  const links = loadQuicklinks().filter((q) => q.id !== id);
+  saveQuicklinks(links);
+  return { success: true };
+});
+
+// ── App state persistence (memory) ──
+
+const stateFile = path.join(app.getPath('userData'), 'app-state.json');
+
+function loadAppState() {
+  try {
+    if (!fs.existsSync(stateFile)) return null;
+    return JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+  } catch { return null; }
+}
+
+function saveAppState(state) {
+  try {
+    const current = loadAppState() || {};
+    const merged = { ...current, ...state };
+    fs.writeFileSync(stateFile, JSON.stringify(merged, null, 2));
+  } catch {}
+}
+
+ipcMain.handle('state:load', () => loadAppState());
+ipcMain.handle('state:save', (event, state) => {
+  saveAppState(state);
   return { success: true };
 });

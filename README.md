@@ -1,6 +1,6 @@
 # ShellTab
 
-A cross-platform tabbed terminal emulator with built-in FTP client and timed nudge system. Built with Electron, xterm.js, and node-pty.
+A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser that follows your shell**, an FTP client, and a timed nudge system. Built with Electron, xterm.js, node-pty and ssh2.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -11,16 +11,28 @@ A cross-platform tabbed terminal emulator with built-in FTP client and timed nud
 - Full PTY-backed terminal sessions with xterm.js rendering
 - Catppuccin Mocha color theme
 - Create, close, rename, and cycle through tabs
-- Keyboard shortcuts: `Ctrl+T` (new tab), `Ctrl+W` (close tab), `Ctrl+Tab` / `Ctrl+Shift+Tab` (cycle tabs)
+- Keyboard shortcuts below
 - Double-click a tab title to rename it
 - Uses your default shell (bash/zsh on Linux, PowerShell/cmd on Windows)
 
+### Native SSH Sessions
+- Real SSH connections via [ssh2](https://github.com/mscdex/ssh2) — no OpenSSH client, PuTTY or WSL required
+- Authentication by **password**, **private key** (with passphrase), or **SSH agent / Pageant**
+- Interactive prompts for passwords, key passphrases and multi-factor challenges
+- Private keys in `~/.ssh` are discovered automatically, including non-standard names
+- Host keys are verified against a stored `known-hosts.json`; you are warned loudly if one changes
+- Keepalives hold long-lived sessions open; tabs are badged `SSH` and dim when disconnected
+- Sessions are remembered across restarts and reconnect on demand with `Ctrl+Shift+R`
+
+### SFTP Browser
+- A graphical file browser riding the **same** SSH connection — no second login
+- **Follows the terminal**: `cd` somewhere in the shell and the browser goes with you
+- Upload, download, rename, delete, `mkdir`, and `chmod` from a right-click menu
+- Multi-select, drag-and-drop upload from the desktop, and live transfer progress
+- Sizes, timestamps and `rwxr-xr-x` permissions for every entry
+
 ### Built-in FTP Client
-- Side panel FTP client with connect/browse/upload/download/delete
-- FTPS (TLS) support
-- Directory navigation with breadcrumb path bar
-- Create remote directories
-- File size display with human-readable formatting
+Retained for plain FTP/FTPS servers; see the FTP panel. For anything on port 22, use SSH/SFTP.
 
 ### Saved Hosts
 - After a successful FTP connection, ShellTab prompts to save the connection
@@ -28,10 +40,22 @@ A cross-platform tabbed terminal emulator with built-in FTP client and timed nud
 - One-click reconnect from the saved hosts list
 - Delete saved hosts when no longer needed
 
-### SSH Host Detection
-- When you SSH into a server from a terminal tab, ShellTab detects the hostname
-- Opening the FTP panel auto-fills the host and username from the active SSH session
-- Streamlines the workflow of SSHing in and then FTPing to the same server
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+T` | New local terminal tab |
+| `Ctrl+Shift+S` | New SSH session |
+| `Ctrl+Shift+W` | Close the current tab |
+| `Ctrl+Shift+B` | Toggle the SFTP browser |
+| `Ctrl+Shift+R` | Reconnect a restored SSH tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle tabs |
+| `Alt+1`…`Alt+9` | Jump to a tab |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
+
+Terminal shortcuts use `Ctrl+Shift` so that plain `Ctrl+C`, `Ctrl+T` and `Ctrl+W`
+still reach the remote shell. Right-click copies a selection, or pastes when
+there is none.
 
 ### Timed Nudges
 - Configure periodic actions on a per-tab or global (active tab) basis
@@ -40,6 +64,48 @@ A cross-platform tabbed terminal emulator with built-in FTP client and timed nud
   - **Overlay notification**: Displays a toast notification over the terminal without affecting the shell
 - Configurable interval (in seconds)
 - Pause, resume, and remove individual nudges
+
+### Keep-Alive
+Sessions die two different ways, so the **Keep-Alive** toolbar button covers both.
+The button lights up whenever something is being held open.
+- **Keep this PC awake** — holds a `powerSaveBlocker`, the same hold a video
+  player takes while playing, so Windows never sleeps, locks, or blanks on idle.
+  Choose *screen and system* (video-player behaviour) or *system only*, which
+  lets the monitor sleep but keeps the machine from suspending.
+- **SSH keepalive** — protocol-level keepalives on the interval you set
+  (default 20s, `0` disables). Fixed at connect time, so it applies to sessions
+  opened after the change.
+- **Anti-idle** — writes a NUL byte into the session itself on an interval, for
+  bastions and firewalls that only count *channel* traffic and ignore protocol
+  keepalives. No shell echoes or acts on it. Applies to live sessions
+  immediately.
+
+Settings persist in `keepalive.json` under the app's user-data directory.
+
+### Remote Update
+The **Update** button checks GitHub Releases for a newer ShellTab.
+- One quiet check ~8s after launch, then every 6 hours; a find raises a toast
+  and marks the toolbar button
+- Downloads are never automatic — you click **Download**, then
+  **Restart & Install**
+- Only works in an installed build; a dev run says so rather than erroring
+
+**Update source** is selectable in the same dialog:
+- **GitHub Releases** (default) — the repo named by `build.publish` in `package.json`
+- **Local server / Tailscale** — any directory served over HTTP holding
+  `latest.yml` and the installer, for machines with no path to github.com.
+  Point it at a LAN IP or a Tailscale name; the choice persists in
+  `update-source.json` under the app's user-data directory.
+
+To host a feed yourself, copy `latest.yml` and the installer out of `dist/`
+into a served directory — renaming the exe to the hyphenated name `latest.yml`
+refers to (`ShellTab-Setup-x.y.z.exe`), since electron-builder writes the file
+with spaces but records it with hyphens:
+
+```bash
+install -Dm644 "dist/ShellTab Setup 1.5.0.exe" /srv/shelltab/ShellTab-Setup-1.5.0.exe
+install -Dm644 dist/latest.yml /srv/shelltab/latest.yml
+```
 
 ## Installation
 
@@ -78,10 +144,16 @@ npm run dist:win
 ```
 shelltab/
   main.js              Electron main process (PTY management, FTP, saved hosts)
+  sshmanager.js        Native SSH + SFTP backend (ssh2), host-key verification
+  keepalive.js         Power-save blocker, SSH keepalive and anti-idle settings
+  updater.js           electron-updater wiring against GitHub Releases
+  smoketest.js         Headless UI test harness (not shipped)
   preload.js           Context bridge (IPC between main and renderer)
   renderer/
     index.html         UI layout
-    app.js             Renderer logic (tabs, FTP UI, nudges, SSH detection)
+    app.js             Renderer logic (tabs, transports, dialogs, nudges)
+    sftp.js            SFTP browser panel
+    shellint.js        Shell-integration bootstrap (OSC 7 cwd reporting)
     styles.css         Catppuccin Mocha theme
     bundle.js          esbuild output (generated)
     xterm.css          xterm styles (copied from node_modules)
@@ -93,14 +165,18 @@ shelltab/
 - **[Electron](https://www.electronjs.org/)** - Cross-platform desktop app shell
 - **[xterm.js](https://xtermjs.org/)** - Terminal emulator component
 - **[node-pty](https://github.com/nicknisi/node-pty)** - Native PTY bindings
+- **[ssh2](https://github.com/mscdex/ssh2)** - Pure-JS SSH2 client and SFTP
 - **[basic-ftp](https://github.com/patrickjuchli/basic-ftp)** - FTP/FTPS client
 - **[esbuild](https://esbuild.github.io/)** - Fast JS bundler for the renderer
 - **[electron-builder](https://www.electron.build/)** - Packaging and distribution
+- **[electron-updater](https://www.electron.build/auto-update)** - In-app updates from GitHub Releases
 
 ### Security
 - Renderer runs with `contextIsolation: true` and `nodeIntegration: false`
 - All main-process communication goes through a preload script using `contextBridge`
-- FTP passwords are encrypted via `safeStorage` (OS keychain / DPAPI on Windows / libsecret on Linux)
+- Saved passwords are encrypted via `safeStorage` (DPAPI on Windows, libsecret on Linux)
+- SSH host keys are pinned in `known-hosts.json`; a changed key raises a blocking warning
+- Credentials never touch the terminal stream — they go straight to the SSH transport
 - No remote content is loaded; all assets are local
 
 ## Scripts
@@ -114,6 +190,18 @@ shelltab/
 | `npm run dist:win` | Build Windows NSIS installer |
 | `npm run dist:linux` | Build Linux AppImage + .deb |
 | `npm run dist:all` | Build for all platforms |
+| `npm run smoketest` | Headless end-to-end test of the SSH/SFTP UI (needs `xvfb` and an sshd on 127.0.0.1) |
+
+## Notes
+
+`ssh2` pulls in the optional native module `cpu-features`, used only as an AES-NI
+hint. ShellTab excludes it from packaged builds so Windows installs never need a
+C++ toolchain — if `npm install` complains about it, the failure is safe to ignore.
+
+Shell integration works by setting `PROMPT_COMMAND` / `precmd` on the remote host
+so the shell reports its working directory via OSC 7. It targets bash and zsh; on
+other shells the SFTP browser simply stops following and you navigate it by hand.
+Turn it off per session in the connect dialog.
 
 ## License
 
