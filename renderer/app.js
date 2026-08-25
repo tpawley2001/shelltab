@@ -395,6 +395,88 @@ function refitActive() {
   }, 50);
 }
 
+// ── Side panel resizing ──
+// Both sidebars steal width from the terminal, so each gets a drag grip and a
+// double-click escape hatch. Widths persist with the rest of the app state.
+
+function initPanelResizer(panelId, resizerId, buttonId, defaultWidth) {
+  const panel = document.getElementById(panelId);
+  const grip = document.getElementById(resizerId);
+  const button = document.getElementById(buttonId);
+  const MIN = 220;
+  // Always leave the terminal something usable, even on a narrow window.
+  const maxWidth = () => Math.max(MIN, window.innerWidth - 360);
+
+  let width = defaultWidth;
+
+  function apply(px) {
+    width = Math.round(Math.min(Math.max(px, MIN), maxWidth()));
+    // #sftp-panel carries a CSS min-width that would otherwise win the clamp.
+    panel.style.width = `${width}px`;
+    panel.style.minWidth = `${width}px`;
+    panel.style.maxWidth = `${width}px`;
+    return width;
+  }
+
+  // The SFTP panel is opened and closed from inside sftp.js too, so watch the
+  // class rather than trying to hook every call site.
+  function syncVisibility() {
+    const open = !panel.classList.contains('hidden');
+    grip.classList.toggle('hidden', !open);
+    if (button) button.classList.toggle('toggled', open);
+  }
+  new MutationObserver(syncVisibility).observe(panel, { attributes: true, attributeFilter: ['class'] });
+  syncVisibility();
+
+  let startX = 0;
+  let startWidth = 0;
+
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    startX = e.clientX;
+    startWidth = panel.getBoundingClientRect().width;
+    // Capture keeps the drag alive over the terminal; harmless if unsupported.
+    try { grip.setPointerCapture(e.pointerId); } catch {}
+    grip.classList.add('dragging');
+    document.body.classList.add('resizing');
+  });
+
+  grip.addEventListener('pointermove', (e) => {
+    if (!grip.classList.contains('dragging')) return;
+    // The terminal refits on its own — a ResizeObserver watches the container.
+    apply(startWidth + (e.clientX - startX));
+  });
+
+  const endDrag = (e) => {
+    if (!grip.classList.contains('dragging')) return;
+    grip.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    try { grip.releasePointerCapture(e.pointerId); } catch {}
+    persistState();
+    refitActive();
+  };
+  grip.addEventListener('pointerup', endDrag);
+  grip.addEventListener('pointercancel', endDrag);
+
+  // Double-click the grip to get the panel out of the way entirely.
+  grip.addEventListener('dblclick', () => {
+    panel.classList.add('hidden');
+    persistState();
+    refitActive();
+  });
+
+  // A shrinking window can strand a panel wider than the terminal.
+  window.addEventListener('resize', () => apply(width));
+
+  return {
+    restore: (px) => apply(px || defaultWidth),
+    width: () => Math.round(panel.getBoundingClientRect().width) || width,
+  };
+}
+
+const ftpResizer = initPanelResizer('ftp-panel', 'ftp-resizer', 'btn-ftp', 320);
+const sftpResizer = initPanelResizer('sftp-panel', 'sftp-resizer', 'btn-sftp', 380);
+
 // ── FTP Panel ──
 document.getElementById('btn-ftp').addEventListener('click', () => {
   ftpPanel.classList.toggle('hidden');
@@ -408,6 +490,7 @@ document.getElementById('btn-ftp').addEventListener('click', () => {
 
 document.getElementById('ftp-close').addEventListener('click', () => {
   ftpPanel.classList.add('hidden');
+  persistState();
   refitActive();
 });
 
@@ -1180,6 +1263,8 @@ function persistState() {
     tabs: tabState,
     ftpPanelOpen: !ftpPanel.classList.contains('hidden'),
     sftpPanelOpen: sftp.isOpen(),
+    ftpPanelWidth: ftpResizer.width(),
+    sftpPanelWidth: sftpResizer.width(),
   });
 }
 
@@ -1438,6 +1523,10 @@ sftp.init({ showToast, onLayoutChange: refitActive });
   } else {
     await createTab({ title: 'Terminal 1' });
   }
+
+  // Restore widths before the panels are shown, so nothing snaps into place.
+  ftpResizer.restore(state?.ftpPanelWidth);
+  sftpResizer.restore(state?.sftpPanelWidth);
 
   renderKeepAlive(await window.api.keepAliveGet());
   renderUpdate(await window.api.updateState());

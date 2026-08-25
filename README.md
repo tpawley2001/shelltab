@@ -31,6 +31,14 @@ A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser tha
 - Multi-select, drag-and-drop upload from the desktop, and live transfer progress
 - Sizes, timestamps and `rwxr-xr-x` permissions for every entry
 
+### Resizable Sidebars
+Both the SFTP browser and the FTP panel have a drag grip on their inner edge.
+- Drag to resize; the terminal refits live as you go
+- **Double-click the grip** to hide that panel outright
+- Width clamps to 220px minimum and always leaves the terminal 360px
+- Widths and open/closed state persist across restarts
+- The **Files** and **FTP** toolbar buttons light up while their panel is open
+
 ### Built-in FTP Client
 Retained for plain FTP/FTPS servers; see the FTP panel. For anything on port 22, use SSH/SFTP.
 

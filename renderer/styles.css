@@ -1448,3 +1448,45 @@ body {
   background: var(--accent);
   transition: width 0.15s linear;
 }
+
+/* ── Side panel resizers ── */
+
+.panel-resizer {
+  flex: 0 0 6px;
+  background: var(--bg-mid);
+  border-right: 1px solid var(--border);
+  cursor: col-resize;
+  position: relative;
+  transition: background 0.1s;
+}
+
+.panel-resizer.hidden { display: none !important; }
+
+/* A grip the eye can find without hunting for the 6px hot zone. */
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  width: 2px;
+  height: 28px;
+  margin-top: -14px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.panel-resizer:hover,
+.panel-resizer.dragging {
+  background: var(--accent-dim);
+}
+
+.panel-resizer:hover::after,
+.panel-resizer.dragging::after {
+  background: var(--accent);
+}
+
+/* Dragging must not select the terminal text it passes over. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}

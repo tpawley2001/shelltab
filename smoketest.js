@@ -46,6 +46,49 @@ function run(mainWindow, app) {
       `(async () => { const a=document.getElementById('ssh-auth'); a.value='key'; a.dispatchEvent(new Event('change')); await new Promise(r=>setTimeout(r,100)); const keyShown=!document.getElementById('ssh-key-row').classList.contains('hidden'); const passHidden=document.getElementById('ssh-pass').classList.contains('hidden'); return { ok: keyShown && passHidden, keyShown, passHidden }; })()`);
     await probe('SFTP panel toggles',
       `(async () => { document.getElementById('ssh-cancel-btn').click(); document.getElementById('btn-sftp').click(); await new Promise(r=>setTimeout(r,200)); const open=!document.getElementById('sftp-panel').classList.contains('hidden'); const empty=!document.getElementById('sftp-empty').classList.contains('hidden'); document.getElementById('btn-sftp').click(); return { ok: open && empty, open, emptyStateShown: empty }; })()`);
+    await probe('FTP sidebar drags to a new width and persists it',
+      `(async () => {
+         const panel = document.getElementById('ftp-panel');
+         const grip = document.getElementById('ftp-resizer');
+         if (panel.classList.contains('hidden')) document.getElementById('btn-ftp').click();
+         await new Promise(r => setTimeout(r, 200));
+         const gripShown = !grip.classList.contains('hidden');
+         const before = panel.getBoundingClientRect().width;
+         const x = grip.getBoundingClientRect().left;
+         const ev = (t, cx) => new PointerEvent(t, { clientX: cx, bubbles: true, pointerId: 1 });
+         grip.dispatchEvent(ev('pointerdown', x));
+         grip.dispatchEvent(ev('pointermove', x + 120));
+         grip.dispatchEvent(ev('pointerup', x + 120));
+         await new Promise(r => setTimeout(r, 200));
+         const after = panel.getBoundingClientRect().width;
+         const saved = (await window.api.loadState())?.ftpPanelWidth;
+         return { ok: gripShown && after > before + 100 && saved === Math.round(after), before, after, saved };
+       })()`);
+    await probe('grip clamps to a minimum instead of collapsing the panel',
+      `(async () => {
+         const panel = document.getElementById('ftp-panel');
+         const grip = document.getElementById('ftp-resizer');
+         const x = grip.getBoundingClientRect().left;
+         const ev = (t, cx) => new PointerEvent(t, { clientX: cx, bubbles: true, pointerId: 1 });
+         grip.dispatchEvent(ev('pointerdown', x));
+         grip.dispatchEvent(ev('pointermove', x - 5000));
+         grip.dispatchEvent(ev('pointerup', x - 5000));
+         await new Promise(r => setTimeout(r, 150));
+         const w = panel.getBoundingClientRect().width;
+         return { ok: w >= 220 && w <= 221, width: w };
+       })()`);
+    await probe('double-clicking the grip hides the panel for good',
+      `(async () => {
+         const panel = document.getElementById('ftp-panel');
+         const grip = document.getElementById('ftp-resizer');
+         grip.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+         await new Promise(r => setTimeout(r, 200));
+         const hidden = panel.classList.contains('hidden');
+         const gripGone = grip.classList.contains('hidden');
+         const persisted = (await window.api.loadState())?.ftpPanelOpen;
+         const lit = document.getElementById('btn-ftp').classList.contains('toggled');
+         return { ok: hidden && gripGone && persisted === false && !lit, hidden, gripGone, persisted, toolbarLit: lit };
+       })()`);
     await probe('keep-alive settings round-trip through the main process',
       `(async () => {
          const before = await window.api.keepAliveGet();
@@ -58,8 +101,13 @@ function run(mainWindow, app) {
       `(async () => {
          await window.api.keepAliveSet({ enabled: true, keepAwake: true, antiIdle: true, antiIdleSeconds: 90 });
          document.getElementById('btn-keepalive').click();
-         await new Promise(r => setTimeout(r, 300));
-         const open = !document.getElementById('keepalive-modal').classList.contains('hidden');
+         // The handler awaits an IPC round-trip, and powerSaveBlocker can be
+         // slow to answer over DBus — poll rather than guess a sleep.
+         const modal = document.getElementById('keepalive-modal');
+         for (let i = 0; i < 40 && modal.classList.contains('hidden'); i++) {
+           await new Promise(r => setTimeout(r, 50));
+         }
+         const open = !modal.classList.contains('hidden');
          const lit = document.getElementById('btn-keepalive').classList.contains('toggled');
          const secs = document.getElementById('ka-antiidle-secs').value;
          document.getElementById('keepalive-done').click();
