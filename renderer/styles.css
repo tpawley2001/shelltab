@@ -1458,6 +1458,8 @@ body {
   color: var(--text-dim);
 }
 
+#update-folder-row #update-folder { flex: 1; min-width: 0; }
+
 #update-status {
   font-size: 13px;
   line-height: 1.5;

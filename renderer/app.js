@@ -3,6 +3,7 @@ const { FitAddon } = require('@xterm/addon-fit');
 const { WebLinksAddon } = require('@xterm/addon-web-links');
 const sftp = require('./sftp');
 const dialogs = require('./dialogs');
+const suggest = require('./suggest');
 
 // ── State ──
 const tabs = new Map();
@@ -78,6 +79,9 @@ function tabClose(tab) {
 
 // Swallow the shell-integration bootstrap so the user never sees it.
 function tabWrite(tab, data) {
+  // Output may have painted over a suggestion; the controller re-draws once
+  // the wire goes quiet.
+  if (tab.suggest) tab.suggest.onOutput();
   const sup = tab.suppress;
   if (!sup) return tab.xterm.write(data);
 
@@ -152,13 +156,28 @@ async function createTab(opts = {}) {
     sshId: null,
     termId: null,
     suppress: null,
+    suggest: null,
   };
   tabs.set(tabId, tab);
 
-  xterm.onData((data) => tabSend(tab, data));
+  // Ghost-text completion of the line being typed. Every keystroke goes through
+  // the controller on its way out so it can track the line and drop its guess
+  // the moment the shell does something it cannot model.
+  tab.suggest = suggest.attach(tab, {
+    send: (data) => tabSend(tab, data),
+    isActive: () => activeTabId === tabId,
+    onRecord: scheduleHistorySave,
+  });
+
+  xterm.onData((data) => {
+    tab.suggest.onInput(data);
+    tabSend(tab, data);
+  });
 
   // The remote shell tells us where it is; keep the file browser in step.
   xterm.parser.registerOscHandler(7, (uri) => {
+    // A prompt just fired: nothing is half-typed any more.
+    tab.suggest.reset();
     const m = /^file:\/\/[^/]*(\/.*)$/.exec(uri);
     if (m && tab.sshId != null) {
       let dir = m[1];
@@ -170,6 +189,11 @@ async function createTab(opts = {}) {
 
   xterm.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
+    // Tab and Right arrow take the suggestion when there is one; with none
+    // showing they are the shell's own — completion, and moving the cursor.
+    if ((e.key === 'Tab' || e.key === 'ArrowRight') && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      if (tab.suggest.accept()) return false;
+    }
     // Ctrl+Shift+C/V are the unambiguous terminal clipboard bindings; plain
     // Ctrl+C still reaches the remote as SIGINT unless there is a selection.
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'c') {
@@ -315,6 +339,7 @@ function closeTab(tabId) {
   if (!tab) return;
 
   tabClose(tab);
+  if (tab.suggest) tab.suggest.dispose();
   tab.xterm.dispose();
   tab.wrapper.remove();
   tab.tabEl.remove();
@@ -1264,12 +1289,40 @@ function persistState() {
   }
   window.api.saveState({
     tabs: tabState,
+    suggestEnabled,
+    commandHistory: suggest.all(),
     ftpPanelOpen: !ftpPanel.classList.contains('hidden'),
     sftpPanelOpen: sftp.isOpen(),
     ftpPanelWidth: ftpResizer.width(),
     sftpPanelWidth: sftpResizer.width(),
   });
 }
+
+// ── Command suggestions ──
+// The history rides in the same app-state file as the tabs, so a command typed
+// on Monday is still being offered on Friday. Writes are debounced: a command
+// is recorded on every Enter, and saving the file that often would be silly.
+
+let suggestEnabled = true;
+let historySaveTimer = null;
+const suggestBtn = document.getElementById('btn-suggest');
+
+function scheduleHistorySave() {
+  clearTimeout(historySaveTimer);
+  historySaveTimer = setTimeout(persistState, 2000);
+}
+
+function setSuggestEnabled(on) {
+  suggestEnabled = !!on;
+  suggest.setEnabled(suggestEnabled);
+  suggestBtn.classList.toggle('toggled', suggestEnabled);
+}
+
+suggestBtn.addEventListener('click', () => {
+  setSuggestEnabled(!suggestEnabled);
+  showToast('Suggestions', suggestEnabled ? 'On — Tab accepts the grey text' : 'Off');
+  persistState();
+});
 
 // ── Keyboard shortcuts ──
 document.addEventListener('keydown', (e) => {
@@ -1398,6 +1451,10 @@ const updEls = {
   source: document.getElementById('update-source'),
   url: document.getElementById('update-url'),
   urlHint: document.getElementById('update-url-hint'),
+  folderRow: document.getElementById('update-folder-row'),
+  folder: document.getElementById('update-folder'),
+  folderHint: document.getElementById('update-folder-hint'),
+  browse: document.getElementById('update-browse-btn'),
   check: document.getElementById('update-check-btn'),
   download: document.getElementById('update-download-btn'),
   install: document.getElementById('update-install-btn'),
@@ -1408,9 +1465,12 @@ function renderUpdateSource(src) {
   if (!src) return;
   updEls.source.value = src.mode || 'github';
   updEls.url.value = src.url || '';
-  const custom = updEls.source.value === 'url';
-  updEls.url.classList.toggle('hidden', !custom);
-  updEls.urlHint.classList.toggle('hidden', !custom);
+  updEls.folder.value = src.folder || '';
+  const mode = updEls.source.value;
+  updEls.url.classList.toggle('hidden', mode !== 'url');
+  updEls.urlHint.classList.toggle('hidden', mode !== 'url');
+  updEls.folderRow.classList.toggle('hidden', mode !== 'folder');
+  updEls.folderHint.classList.toggle('hidden', mode !== 'folder');
 }
 
 function renderUpdate(state) {
@@ -1482,21 +1542,36 @@ updateModal.addEventListener('click', (e) => {
   if (e.target === updateModal) closeUpdate();
 });
 
+function updateSourcePatch() {
+  return {
+    mode: updEls.source.value,
+    url: updEls.url.value.trim(),
+    folder: updEls.folder.value.trim(),
+  };
+}
+
 updEls.source.addEventListener('change', async () => {
-  const mode = updEls.source.value;
-  renderUpdateSource({ mode, url: updEls.url.value });
-  // Switching back to GitHub takes effect at once; a custom feed waits for a
-  // URL so an empty box does not silently disable updates.
-  if (mode === 'github' || updEls.url.value.trim()) {
-    renderUpdateSource(await window.api.updateSourceSet({ mode, url: updEls.url.value.trim() }));
-  }
+  const patch = updateSourcePatch();
+  renderUpdateSource(patch);
+  // Switching back to GitHub takes effect at once; a local feed waits for a URL
+  // or folder so an empty box does not silently disable updates.
+  const ready = patch.mode === 'github'
+    || (patch.mode === 'url' && patch.url)
+    || (patch.mode === 'folder' && patch.folder);
+  if (ready) renderUpdateSource(await window.api.updateSourceSet(patch));
 });
 
 updEls.url.addEventListener('change', async () => {
-  renderUpdateSource(await window.api.updateSourceSet({
-    mode: updEls.source.value,
-    url: updEls.url.value.trim(),
-  }));
+  renderUpdateSource(await window.api.updateSourceSet(updateSourcePatch()));
+});
+
+updEls.folder.addEventListener('change', async () => {
+  renderUpdateSource(await window.api.updateSourceSet(updateSourcePatch()));
+});
+
+// The picker sets the source itself, so a cancel leaves the old one alone.
+updEls.browse.addEventListener('click', async () => {
+  renderUpdateSource(await window.api.updateSourceBrowse());
 });
 
 updEls.check.addEventListener('click', () => window.api.updateCheck());
@@ -1512,6 +1587,9 @@ sftp.init({ showToast, onLayoutChange: refitActive });
 (async () => {
   const state = await window.api.loadState();
   const saved = state?.tabs?.length ? state.tabs : null;
+
+  suggest.load(state?.commandHistory);
+  setSuggestEnabled(state?.suggestEnabled !== false);
 
   if (saved) {
     for (const t of saved) {
@@ -1560,3 +1638,10 @@ document.addEventListener('keydown', async (e) => {
   closeTab(activeTabId);
   await createTab({ kind: 'ssh', title: session.label || session.host, session });
 });
+
+// Smoketest hooks: the real app never touches these. The flag is set by
+// appending ?selftest=1 to index.html before the bundle runs (see smoketest.js).
+if (new URLSearchParams(window.location.search).has('selftest')) {
+  window.__testActiveTab = () => tabs.get(activeTabId);
+  window.__testSuggest = suggest;
+}

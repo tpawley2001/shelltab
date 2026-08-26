@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('api', {
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateSourceGet: () => ipcRenderer.invoke('update:source:get'),
   updateSourceSet: (patch) => ipcRenderer.invoke('update:source:set', patch),
+  updateSourceBrowse: () => ipcRenderer.invoke('update:source:browse'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
   onUpdateState: (cb) => ipcRenderer.on('update:state', (e, state) => cb(state)),

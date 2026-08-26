@@ -29,6 +29,7 @@
     </div>
     <button id="btn-nudges" title="Manage Nudges">Nudges</button>
     <button id="btn-keepalive" title="Keep sessions alive and this PC awake">Keep-Alive</button>
+    <button id="btn-suggest" title="Suggest the rest of a command as you type (Tab or Right arrow accepts)">Suggest</button>
     <button id="btn-update" title="Check for a new version of ShellTab">Update</button>
   </div>
 
@@ -289,14 +290,25 @@
         <label class="field-label">Update source
           <select id="update-source">
             <option value="github">GitHub Releases</option>
+            <option value="folder">Local folder or share</option>
             <option value="url">Local server / Tailscale</option>
           </select>
         </label>
         <input type="text" id="update-url" class="hidden" spellcheck="false"
-               placeholder="http://host:port/shelltab/">
+               placeholder="http://nas.tailnet.ts.net/shelltab/">
         <div id="update-url-hint" class="ka-hint hidden">
           Directory holding <code>latest.yml</code> and the installer. A Tailscale
-          name or LAN IP both work.
+          name or LAN IP both work; add <code>:port</code> only if the server is
+          not on 80.
+        </div>
+        <div id="update-folder-row" class="field-row hidden">
+          <input type="text" id="update-folder" spellcheck="false"
+                 placeholder="\\nas\builds\shelltab">
+          <button id="update-browse-btn" class="btn-slim">Browse&hellip;</button>
+        </div>
+        <div id="update-folder-hint" class="ka-hint hidden">
+          Folder, mapped drive or share holding <code>latest.yml</code> and the
+          installer. No web server or port needed.
         </div>
         <div id="update-status"></div>
         <div id="update-progress" class="hidden"><div id="update-bar-fill"></div></div>

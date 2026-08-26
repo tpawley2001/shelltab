@@ -15,6 +15,22 @@ A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser tha
 - Double-click a tab title to rename it
 - Uses your default shell (bash/zsh on Linux, PowerShell/cmd on Windows)
 
+### Command Suggestions
+As you type, the rest of a command you have run before appears in grey after the
+cursor — **Tab** or **Right arrow** takes it, anything else ignores it.
+
+- The guess is drawn into your terminal only; nothing reaches the shell until
+  you accept it, so a wrong guess costs no keystrokes
+- Ranked most-recent-first out of your own history; a short list of common
+  commands fills in until you have one
+- History persists across tabs, sessions and restarts, in `app-state.json`
+  under the app's user-data directory
+- **Suggest** in the toolbar turns it off; the button is lit while it is on
+- With nothing suggested, `Tab` is the shell's own completion and `Right` just
+  moves the cursor, both untouched
+- A prompt that does not echo — `sudo`, `ssh`, anything reading a password — is
+  detected and neither suggested against nor recorded
+
 ### Native SSH Sessions
 - Real SSH connections via [ssh2](https://github.com/mscdex/ssh2) — no OpenSSH client, PuTTY or WSL required
 - Authentication by **password**, **private key** (with passphrase), or **SSH agent / Pageant**
@@ -63,6 +79,7 @@ Files delete via `DELE`; empty folders via `RMD` (previously folder deletion alw
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle tabs |
 | `Alt+1`…`Alt+9` | Jump to a tab |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
+| `Tab` / `Right` | Accept the inline command suggestion (when one is showing) |
 
 Terminal shortcuts use `Ctrl+Shift` so that plain `Ctrl+C`, `Ctrl+T` and `Ctrl+W`
 still reach the remote shell. Right-click copies a selection, or pastes when
@@ -103,20 +120,29 @@ The **Update** button checks GitHub Releases for a newer ShellTab.
 
 **Update source** is selectable in the same dialog:
 - **GitHub Releases** (default) — the repo named by `build.publish` in `package.json`
-- **Local server / Tailscale** — any directory served over HTTP holding
-  `latest.yml` and the installer, for machines with no path to github.com.
-  Point it at a LAN IP or a Tailscale name; the choice persists in
-  `update-source.json` under the app's user-data directory.
+- **Local folder or share** — a folder, mapped drive or `\\server\share` this
+  machine can already read, holding `latest.yml` and the installer. No web
+  server and no port: ShellTab serves the directory to itself on a loopback
+  port it picks. **Browse…** opens a folder picker.
+- **Local server / Tailscale** — the same two files served over HTTP, for
+  feeds shared by several machines. A LAN IP or a Tailscale name both work;
+  `:port` is only needed when the server is not on 80.
 
-To host a feed yourself, copy `latest.yml` and the installer out of `dist/`
-into a served directory — renaming the exe to the hyphenated name `latest.yml`
-refers to (`ShellTab-Setup-x.y.z.exe`), since electron-builder writes the file
-with spaces but records it with hyphens:
+The choice persists in `update-source.json` under the app's user-data directory,
+so a machine with no path to github.com still updates.
+
+Either way the feed is just `latest.yml` plus the installer, copied out of
+`dist/`:
 
 ```bash
-install -Dm644 "dist/ShellTab Setup 1.5.0.exe" /srv/shelltab/ShellTab-Setup-1.5.0.exe
+install -Dm644 "dist/ShellTab Setup 1.6.1.exe" /srv/shelltab/ShellTab-Setup-1.6.1.exe
 install -Dm644 dist/latest.yml /srv/shelltab/latest.yml
 ```
+
+The rename matters for an HTTP feed: electron-builder writes the exe with
+spaces but records the hyphenated name in `latest.yml`, so a plain web server
+404s on it. Folder mode tries both spellings, so a directory copied straight
+out of `dist/` works untouched.
 
 ## Installation
 
@@ -165,6 +191,7 @@ shelltab/
     app.js             Renderer logic (tabs, transports, dialogs, nudges)
     sftp.js            SFTP browser panel
     dialogs.js         In-app prompt/confirm (Electron has no window.prompt)
+    suggest.js         Inline command suggestions (ghost text + history)
     shellint.js        Shell-integration bootstrap (OSC 7 cwd reporting)
     styles.css         Catppuccin Mocha theme
     bundle.js          esbuild output (generated)

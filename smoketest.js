@@ -62,7 +62,66 @@ function run(mainWindow, app) {
     await probe('xterm rendered into wrapper',
       `({ ok: !!document.querySelector('.term-wrapper.active .xterm-screen'), rows: document.querySelectorAll('.xterm-rows').length })`);
     await probe('toolbar buttons wired',
-      `({ ok: ['btn-new-tab','btn-new-ssh','btn-sftp','btn-ftp','btn-quicklinks','btn-nudges','btn-keepalive','btn-update'].every(i => !!document.getElementById(i)) })`);
+      `({ ok: ['btn-new-tab','btn-new-ssh','btn-sftp','btn-ftp','btn-quicklinks','btn-nudges','btn-keepalive','btn-suggest','btn-update'].every(i => !!document.getElementById(i)) })`);
+    // ── Inline command suggestions ──
+
+    await probe('history outranks the built-in commands',
+      `(() => {
+         window.__testSuggest.record('git status --short');
+         const hit = window.__testSuggest.match('git st');
+         return { ok: hit === 'git status --short', hit };
+       })()`);
+
+    await probe('ghost text offers the rest of a command and Tab takes it',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         if (!tab || tab.kind !== 'local') return { ok: false, reason: 'no local tab active' };
+         window.__testSuggest.record('echo shelltab-suggest-probe');
+         for (const ch of 'echo shelltab-s') tab.xterm.input(ch);
+         await new Promise(r => setTimeout(r, 400));
+         const ghost = tab.suggest.state().ghost;
+         const took = tab.suggest.accept();
+         await new Promise(r => setTimeout(r, 300));
+         const line = tab.suggest.state().line;
+         tab.xterm.input('\u0003');
+         await new Promise(r => setTimeout(r, 200));
+         return {
+           ok: ghost === 'uggest-probe' && took && line === 'echo shelltab-suggest-probe',
+           ghost, took, line,
+         };
+       })()`);
+
+    await probe('nothing is suggested or recorded at a prompt that does not echo',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         if (!tab || tab.kind !== 'local') return { ok: false, reason: 'no local tab active' };
+         tab.xterm.input('read -s stprobe\\r');
+         await new Promise(r => setTimeout(r, 600));
+         for (const ch of 'hunter2-secret') tab.xterm.input(ch);
+         await new Promise(r => setTimeout(r, 300));
+         const ghost = tab.suggest.state().ghost;
+         tab.xterm.input('\\r');
+         await new Promise(r => setTimeout(r, 400));
+         const leaked = window.__testSuggest.all().some((c) => c.includes('hunter2'));
+         return { ok: !ghost && !leaked, ghost, leaked };
+       })()`);
+
+    await probe('the toolbar toggle silences suggestions',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const btn = document.getElementById('btn-suggest');
+         const litWhenOn = btn.classList.contains('toggled');
+         btn.click();
+         for (const ch of 'echo shelltab-s') tab.xterm.input(ch);
+         await new Promise(r => setTimeout(r, 400));
+         const ghost = tab.suggest.state().ghost;
+         tab.xterm.input('\u0003');
+         const litWhenOff = btn.classList.contains('toggled');
+         btn.click();
+         await new Promise(r => setTimeout(r, 200));
+         return { ok: litWhenOn && !ghost && !litWhenOff && btn.classList.contains('toggled'), litWhenOn, ghost, litWhenOff };
+       })()`);
+
     await probe('SSH modal opens',
       `(async () => { document.getElementById('btn-new-ssh').click(); await new Promise(r=>setTimeout(r,400)); const m=document.getElementById('ssh-modal'); return { ok: !m.classList.contains('hidden'), user: document.getElementById('ssh-user').value, key: document.getElementById('ssh-key').value }; })()`);
     await probe('SSH auth mode toggles fields',
@@ -161,6 +220,29 @@ function run(mainWindow, app) {
            lan: lan.url, urlFieldShown: shown, restored: back.mode,
          };
        })()`);
+    // Folder mode has to work with no web server in sight, so the probe points
+    // at a throwaway directory holding a latest.yml the app never has to fetch.
+    const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shelltab-feed-'));
+    fs.writeFileSync(path.join(feedDir, 'latest.yml'), 'version: 9.9.9\n');
+    await probe('update source accepts a plain folder, no port asked for',
+      `(async () => {
+         const before = await window.api.updateSourceGet();
+         const set = await window.api.updateSourceSet({ mode: 'folder', folder: ${JSON.stringify(feedDir)} });
+         document.getElementById('btn-update').click();
+         await new Promise(r => setTimeout(r, 300));
+         const rowShown = !document.getElementById('update-folder-row').classList.contains('hidden');
+         const urlHidden = document.getElementById('update-url').classList.contains('hidden');
+         const shownPath = document.getElementById('update-folder').value;
+         const back = await window.api.updateSourceSet(before);
+         document.getElementById('update-close').click();
+         return {
+           ok: set.mode === 'folder' && rowShown && urlHidden && shownPath === ${JSON.stringify(feedDir)}
+               && back.mode === before.mode,
+           rowShown, urlHidden, shownPath, restored: back.mode,
+         };
+       })()`);
+    try { fs.rmSync(feedDir, { recursive: true, force: true }); } catch {}
+
     await probe('key discovery finds non-standard key names',
       `(async () => { const keys = await window.api.sshFindKeys(); return { ok: keys.some(k => k.endsWith('solar_key')), keys: keys.map(k => k.split('/').pop()) }; })()`);
 
