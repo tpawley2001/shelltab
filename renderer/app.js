@@ -46,7 +46,7 @@ const TERM_THEME = {
   brightWhite: '#a6adc8',
 };
 
-const { READY_MARKER, SHELL_INTEGRATION } = require('./shellint');
+const { READY_MARKER, buildBootstrap } = require('./shellint');
 
 // ── Transport: a tab is either a local pty or a native SSH session ──
 
@@ -77,7 +77,9 @@ function tabClose(tab) {
   }
 }
 
-// Swallow the shell-integration bootstrap so the user never sees it.
+// Swallow the shell-integration bootstrap so the user never sees it. Anything
+// that arrives ahead of its echo -- the login banner above all -- is real
+// session output and gets written through.
 function tabWrite(tab, data) {
   // Output may have painted over a suggestion; the controller re-draws once
   // the wire goes quiet.
@@ -86,11 +88,32 @@ function tabWrite(tab, data) {
   if (!sup) return tab.xterm.write(data);
 
   sup.buffer += data;
+
+  if (!sup.sawEcho) {
+    const start = sup.buffer.indexOf(sup.begin);
+    if (start === -1) {
+      // The token may be split across chunks, so hold back only enough to
+      // recognise it and let the rest of the banner through as it lands.
+      const keep = sup.begin.length - 1;
+      if (sup.buffer.length > keep) {
+        tab.xterm.write(sup.buffer.slice(0, sup.buffer.length - keep));
+        sup.buffer = sup.buffer.slice(sup.buffer.length - keep);
+      }
+    } else {
+      if (start > 0) tab.xterm.write(sup.buffer.slice(0, start));
+      sup.buffer = sup.buffer.slice(start);
+      sup.sawEcho = true;
+    }
+  }
+
   const idx = sup.buffer.indexOf(READY_MARKER);
   if (idx !== -1) {
     const rest = sup.buffer.slice(idx + READY_MARKER.length);
     clearTimeout(sup.timer);
     tab.suppress = null;
+    // The echo was never drawn, so the cursor still sits on the prompt line the
+    // shell is about to reprint. Wipe it or the two prompts land side by side.
+    if (sup.sawEcho) tab.xterm.write('\r\x1b[2K');
     if (rest) tab.xterm.write(rest);
   } else if (sup.buffer.length > 8192) {
     flushSuppressed(tab);
@@ -110,6 +133,148 @@ function findTab(kind, id) {
     if (kind === 'ssh' ? tab.sshId === id : tab.termId === id) return tab;
   }
   return null;
+}
+
+// ── Connect / reconnect ──
+// A session that drops -- the server rebooted, the link died -- keeps its tab,
+// its scrollback and its name. The tab grows a Reconnect button that dials the
+// same host straight back into that same tab instead of opening a new one.
+
+function sessionTarget(session) {
+  return `${session.user ? session.user + '@' : ''}${session.host}:${session.port || 22}`;
+}
+
+// Credentials never ride along in the saved app state, so an SSH tab restored
+// from last run comes back with its password stripped. When the session knows
+// which Quicklink it came from -- or a saved Quicklink simply points at the
+// same host -- borrow the credentials back from there rather than prompting for
+// a password the app already has on disk.
+async function hydrateFromQuicklink(session) {
+  if (!session || session.password || session.privateKeyPath) return session;
+
+  let link = session.quicklinkId ? await window.api.getQuicklink(session.quicklinkId) : null;
+  if (!link) {
+    // A Quicklink saved after this tab was opened carries a different id, so
+    // fall back to matching the host the session actually dials.
+    const links = await window.api.listQuicklinks();
+    link = links.find((q) => (q.type || 'ssh') === 'ssh'
+      && q.host === session.host
+      && (q.port || 22) === (session.port || 22)
+      && (q.user || '') === (session.user || '')) || null;
+  }
+  if (!link) return session;
+
+  if (!session.quicklinkId) session.quicklinkId = link.id;
+  if (link.password) session.password = link.password;
+  if (link.privateKeyPath) session.privateKeyPath = link.privateKeyPath;
+  if (link.passphrase) session.passphrase = link.passphrase;
+  return session;
+}
+
+async function connectSsh(tab, session, { fresh = false } = {}) {
+  if (tab.connecting) return false;
+  tab.connecting = true;
+  hideReconnect(tab);
+
+  // A tab restored from last run starts life as a local pty; dialling in
+  // converts it in place rather than opening a second tab beside it.
+  if (tab.kind !== 'ssh') {
+    if (tab.termId != null) window.api.killTerminal(tab.termId);
+    tab.termId = null;
+    tab.kind = 'ssh';
+    tab.tabEl.classList.remove('local');
+    tab.tabEl.classList.add('ssh');
+    const kindEl = tab.tabEl.querySelector('.tab-kind');
+    if (kindEl) kindEl.textContent = 'SSH';
+  }
+  await hydrateFromQuicklink(session);
+  tab.session = session;
+  tab.restoreSession = null;
+
+  flushSuppressed(tab);
+  tab.xterm.write(`${fresh ? '' : '\r\n'}\x1b[90m${fresh ? 'Connecting' : 'Reconnecting'} to ${sessionTarget(session)}…\x1b[0m\r\n`);
+
+  const res = await window.api.sshConnect({ ...session, cols: tab.xterm.cols, rows: tab.xterm.rows });
+  tab.connecting = false;
+
+  if (res.error) {
+    tab.xterm.write(`\r\n\x1b[31mConnection failed: ${res.error}\x1b[0m\r\n`);
+    tab.failed = true;
+    showReconnect(tab, session, 'Connection failed');
+    persistState();
+    return false;
+  }
+
+  tab.failed = false;
+  tab.sshId = res.id;
+  tabResize(tab, tab.xterm.cols, tab.xterm.rows);
+  tab.suggest?.reset();
+
+  if (res.savedPassword && session.quicklinkId) {
+    const link = await window.api.getQuicklink(session.quicklinkId);
+    if (link) await window.api.saveQuicklink({ ...link, password: res.savedPassword });
+  }
+
+  if (session.shellIntegration !== false) {
+    const boot = buildBootstrap();
+    tab.suppress = {
+      buffer: '',
+      begin: boot.beginToken,
+      sawEcho: false,
+      timer: setTimeout(() => flushSuppressed(tab), 4000),
+    };
+    setTimeout(() => tabSend(tab, boot.text), 300);
+  }
+
+  if (activeTabId === tab.tabId) {
+    // Only a brand-new tab opens the file browser; a reconnect just re-points
+    // whatever the user already had open.
+    if (fresh) sftp.show();
+    sftp.setActive(tab.sshId, tab.label);
+  }
+
+  persistState();
+  return true;
+}
+
+function showReconnect(tab, session, message) {
+  if (!session?.host) return;
+  tab.pendingSession = session;
+  tab.tabEl?.classList.add('disconnected');
+
+  if (!tab.reconnectEl) {
+    const bar = document.createElement('div');
+    bar.className = 'reconnect-bar';
+    bar.innerHTML = `
+      <span class="reconnect-msg"></span>
+      <button class="reconnect-btn" type="button">Reconnect</button>
+      <span class="reconnect-hint"></span>
+    `;
+    bar.querySelector('.reconnect-btn').addEventListener('click', () => reconnectTab(tab.tabId));
+    tab.wrapper.appendChild(bar);
+    tab.reconnectEl = bar;
+  }
+
+  tab.reconnectEl.querySelector('.reconnect-msg').textContent = `${message} — ${sessionTarget(session)}`;
+  // Enter only stands in for the button once the tab is a dead SSH tab; a
+  // restored placeholder is still a live local shell that wants its keystrokes.
+  tab.reconnectEl.querySelector('.reconnect-hint').textContent =
+    tab.kind === 'ssh' ? 'Enter · Ctrl+Shift+R' : 'Ctrl+Shift+R';
+  tab.reconnectEl.classList.remove('hidden');
+}
+
+function hideReconnect(tab) {
+  tab.pendingSession = null;
+  tab.reconnectEl?.classList.add('hidden');
+  tab.tabEl?.classList.remove('disconnected');
+}
+
+async function reconnectTab(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.connecting) return;
+  const session = tab.pendingSession || tab.restoreSession;
+  if (!session) return;
+  await connectSsh(tab, session);
 }
 
 // ── Tab creation ──
@@ -170,6 +335,12 @@ async function createTab(opts = {}) {
   });
 
   xterm.onData((data) => {
+    // A dropped SSH tab has nowhere to send keystrokes. Swallow them and let
+    // Enter stand in for the Reconnect button, the way PuTTY's restart does.
+    if (tab.kind === 'ssh' && tab.sshId == null) {
+      if (data.includes('\r') || data.includes('\n')) reconnectTab(tab.tabId);
+      return;
+    }
     tab.suggest.onInput(data);
     tabSend(tab, data);
   });
@@ -273,37 +444,7 @@ async function createTab(opts = {}) {
   updateNudgeTargets();
 
   if (isSsh) {
-    xterm.write(`\x1b[90mConnecting to ${session.user ? session.user + '@' : ''}${session.host}:${session.port || 22}…\x1b[0m\r\n`);
-    const res = await window.api.sshConnect({
-      ...session,
-      cols: xterm.cols,
-      rows: xterm.rows,
-    });
-
-    if (res.error) {
-      xterm.write(`\r\n\x1b[31mConnection failed: ${res.error}\x1b[0m\r\n`);
-      tab.failed = true;
-      persistState();
-      return tabId;
-    }
-
-    tab.sshId = res.id;
-    tabResize(tab, xterm.cols, xterm.rows);
-
-    if (res.savedPassword && session.quicklinkId) {
-      const link = await window.api.getQuicklink(session.quicklinkId);
-      if (link) await window.api.saveQuicklink({ ...link, password: res.savedPassword });
-    }
-
-    if (session.shellIntegration !== false) {
-      tab.suppress = { buffer: '', timer: setTimeout(() => flushSuppressed(tab), 4000) };
-      setTimeout(() => tabSend(tab, SHELL_INTEGRATION), 300);
-    }
-
-    if (activeTabId === tabId) {
-      sftp.show();
-      sftp.setActive(tab.sshId, tab.label);
-    }
+    await connectSsh(tab, session, { fresh: true });
   } else {
     const res = await window.api.createTerminal({ cols: xterm.cols, rows: xterm.rows });
     tab.termId = res.id;
@@ -389,9 +530,10 @@ window.api.onSshExit((sshId) => {
   if (!tab) return;
   flushSuppressed(tab);
   tab.xterm.write('\r\n\x1b[90m[Disconnected]\x1b[0m\r\n');
-  tab.tabEl?.classList.add('disconnected');
   sftp.remove(sshId);
   tab.sshId = null;
+  tab.suggest?.reset();
+  showReconnect(tab, tab.session, 'Disconnected');
 });
 
 window.api.onSshStatus((sshId, msg) => {
@@ -1463,7 +1605,7 @@ let lastUpdateStatus = null;
 
 function renderUpdateSource(src) {
   if (!src) return;
-  updEls.source.value = src.mode || 'github';
+  updEls.source.value = src.mode === 'folder' ? 'folder' : 'url';
   updEls.url.value = src.url || '';
   updEls.folder.value = src.folder || '';
   const mode = updEls.source.value;
@@ -1553,11 +1695,10 @@ function updateSourcePatch() {
 updEls.source.addEventListener('change', async () => {
   const patch = updateSourcePatch();
   renderUpdateSource(patch);
-  // Switching back to GitHub takes effect at once; a local feed waits for a URL
-  // or folder so an empty box does not silently disable updates.
-  const ready = patch.mode === 'github'
-    || (patch.mode === 'url' && patch.url)
-    || (patch.mode === 'folder' && patch.folder);
+  // A blank folder box would silently disable updates, so folder mode waits for
+  // a path. The server route falls back to the built-in feed, so it can commit
+  // right away even with the box empty.
+  const ready = patch.mode === 'url' || (patch.mode === 'folder' && patch.folder);
   if (ready) renderUpdateSource(await window.api.updateSourceSet(patch));
 });
 
@@ -1618,30 +1759,30 @@ sftp.init({ showToast, onLayoutChange: refitActive });
   renderSavedHosts();
 })();
 
-// A restored SSH tab is offered, not forced — reconnect on demand.
+// A restored SSH tab is offered, not forced — reconnect on demand, from the
+// same Reconnect button a dropped session puts up.
 async function createLocalPlaceholderForSsh(t) {
   const tabId = await createTab({ title: t.label });
   const tab = tabs.get(tabId);
   if (!tab) return;
-  const target = `${t.session.user ? t.session.user + '@' : ''}${t.session.host}:${t.session.port || 22}`;
-  tab.xterm.write(`\r\n\x1b[90mPrevious session: \x1b[36m${target}\x1b[90m\r\n`);
-  tab.xterm.write(`Press \x1b[1mCtrl+Shift+R\x1b[0m\x1b[90m in this tab to reconnect.\x1b[0m\r\n`);
+  tab.xterm.write(`\r\n\x1b[90mPrevious session: \x1b[36m${sessionTarget(t.session)}\x1b[0m\r\n`);
   tab.restoreSession = t.session;
+  showReconnect(tab, t.session, 'Previous session');
 }
 
 document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'r')) return;
   const tab = tabs.get(activeTabId);
-  if (!tab?.restoreSession) return;
+  if (!tab || (!tab.pendingSession && !tab.restoreSession)) return;
   e.preventDefault();
-  const session = tab.restoreSession;
-  closeTab(activeTabId);
-  await createTab({ kind: 'ssh', title: session.label || session.host, session });
+  await reconnectTab(activeTabId);
 });
 
 // Smoketest hooks: the real app never touches these. The flag is set by
 // appending ?selftest=1 to index.html before the bundle runs (see smoketest.js).
 if (new URLSearchParams(window.location.search).has('selftest')) {
   window.__testActiveTab = () => tabs.get(activeTabId);
+  window.__testRestorePlaceholder = createLocalPlaceholderForSsh;
+  window.__testHydrateQuicklink = hydrateFromQuicklink;
   window.__testSuggest = suggest;
 }

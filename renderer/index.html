@@ -289,17 +289,16 @@
         <div id="update-version"></div>
         <label class="field-label">Update source
           <select id="update-source">
-            <option value="github">GitHub Releases</option>
-            <option value="folder">Local folder or share</option>
             <option value="url">Local server / Tailscale</option>
+            <option value="folder">Local folder or share</option>
           </select>
         </label>
         <input type="text" id="update-url" class="hidden" spellcheck="false"
-               placeholder="http://nas.tailnet.ts.net/shelltab/">
+               placeholder="http://10.0.2.158/shelltab/">
         <div id="update-url-hint" class="ka-hint hidden">
-          Directory holding <code>latest.yml</code> and the installer. A Tailscale
-          name or LAN IP both work; add <code>:port</code> only if the server is
-          not on 80.
+          Directory holding <code>latest.yml</code> and the installer, on the same
+          web server the other apps here update from. A Tailscale name or LAN IP
+          both work; add <code>:port</code> only if the server is not on 80.
         </div>
         <div id="update-folder-row" class="field-row hidden">
           <input type="text" id="update-folder" spellcheck="false"

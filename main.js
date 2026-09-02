@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron');
 const path = require('path');
 const pty = require('node-pty');
 const ftp = require('basic-ftp');
@@ -39,6 +39,24 @@ function createWindow() {
   const loadOpts = process.env.SHELLTAB_SELFTEST ? { query: { selftest: '1' } } : undefined;
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'), loadOpts);
   mainWindow.setMenuBarVisibility(false);
+
+  // Links clicked in a terminal open in the user's browser, not in here.
+  // xterm's web-links addon and its OSC-8 hyperlink support both go through
+  // window.open, which Electron denies by default — so without this a link
+  // in terminal output (a CI URL, or the Kickbacks status-line ad) looked
+  // clickable and did nothing at all. 'deny' still stands: the URL is handed
+  // to the desktop, never opened as a window inside the app.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  // A drag-and-drop or a stray link must not navigate the shell UI away.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) {
+      event.preventDefault();
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    }
+  });
 
   // SHELLTAB_DEBUG=1 surfaces renderer console output in the terminal.
   if (process.env.SHELLTAB_DEBUG) {

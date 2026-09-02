@@ -14,6 +14,7 @@ A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser tha
 - Keyboard shortcuts below
 - Double-click a tab title to rename it
 - Uses your default shell (bash/zsh on Linux, PowerShell/cmd on Windows)
+- URLs in terminal output are clickable and open in your desktop browser, never inside the app
 
 ### Command Suggestions
 As you type, the rest of a command you have run before appears in grey after the
@@ -39,7 +40,13 @@ cursor — **Tab** or **Right arrow** takes it, anything else ignores it.
 - Private keys in `~/.ssh` are discovered automatically, including non-standard names
 - Host keys are verified against a stored `known-hosts.json`; you are warned loudly if one changes
 - Keepalives hold long-lived sessions open; tabs are badged `SSH` and dim when disconnected
-- Sessions are remembered across restarts and reconnect on demand with `Ctrl+Shift+R`
+- A session that drops — server reboot, dead link — puts a **Reconnect** button on the tab and dials the same host back into that same tab, keeping its scrollback and name
+- Sessions are remembered across restarts and reconnect on demand from the same button (or `Ctrl+Shift+R`)
+- **Reconnect never re-asks for a password you already saved.** The saved session state deliberately holds no
+  credentials, so a reconnecting tab refills the password, key and passphrase from its Quicklink — matched by id,
+  or by host, port and user when the Quicklink was saved later. A password typed for this session still wins
+- The login banner (motd, disk usage, pending updates) stays on screen; only the shell-integration bootstrap's own
+  echo is hidden
 
 ### SFTP Browser
 - A graphical file browser riding the **same** SSH connection — no second login
@@ -61,6 +68,15 @@ Both the SFTP browser and the FTP panel have a drag grip on their inner edge.
 Retained for plain FTP/FTPS servers; see the FTP panel. For anything on port 22, use SSH/SFTP.
 Files delete via `DELE`; empty folders via `RMD` (previously folder deletion always failed).
 
+### Quicklinks
+The **Quicklinks** toolbar button holds your saved connections — SSH sessions, FTP sites, and plain
+commands to run in a fresh tab.
+- Tick *Save as Quicklink* in the connect dialog, or add one straight from the dropdown
+- Passwords are encrypted at rest with the OS keychain (Electron `safeStorage`), in `quicklinks.json`
+  under the app's user-data directory
+- A password you type at an interactive prompt can be saved back to the Quicklink from that prompt
+- One click connects; the credentials are also what a **Reconnect** falls back on
+
 ### Saved Hosts
 - After a successful FTP connection, ShellTab prompts to save the connection
 - Passwords are encrypted at rest using the OS keychain (Electron `safeStorage` API)
@@ -75,7 +91,7 @@ Files delete via `DELE`; empty folders via `RMD` (previously folder deletion alw
 | `Ctrl+Shift+S` | New SSH session |
 | `Ctrl+Shift+W` | Close the current tab |
 | `Ctrl+Shift+B` | Toggle the SFTP browser |
-| `Ctrl+Shift+R` | Reconnect a restored SSH tab |
+| `Ctrl+Shift+R` | Reconnect a dropped or restored SSH tab (Enter does it too in a dropped tab) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle tabs |
 | `Alt+1`…`Alt+9` | Jump to a tab |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
@@ -111,7 +127,10 @@ The button lights up whenever something is being held open.
 Settings persist in `keepalive.json` under the app's user-data directory.
 
 ### Remote Update
-The **Update** button checks GitHub Releases for a newer ShellTab.
+The **Update** button checks the build server for a newer ShellTab. The feed is
+the web server the other self-updating apps here already use — `build.publish`
+in `package.json` names it, and the installed build inherits it — so an update
+never depends on reaching github.com or on a GitHub Release existing.
 - One quiet check ~8s after launch, then every 6 hours; a find raises a toast
   and marks the toolbar button
 - Downloads are never automatic — you click **Download**, then
@@ -119,25 +138,30 @@ The **Update** button checks GitHub Releases for a newer ShellTab.
 - Only works in an installed build; a dev run says so rather than erroring
 
 **Update source** is selectable in the same dialog:
-- **GitHub Releases** (default) — the repo named by `build.publish` in `package.json`
-- **Local folder or share** — a folder, mapped drive or `\\server\share` this
-  machine can already read, holding `latest.yml` and the installer. No web
-  server and no port: ShellTab serves the directory to itself on a loopback
-  port it picks. **Browse…** opens a folder picker.
-- **Local server / Tailscale** — the same two files served over HTTP, for
-  feeds shared by several machines. A LAN IP or a Tailscale name both work;
-  `:port` is only needed when the server is not on 80.
+- **Local server / Tailscale** (default) — a directory served over HTTP holding
+  `latest.yml` and the installer. Empty means the built-in feed from
+  `build.publish`. A LAN IP or a Tailscale name both work; `:port` is only
+  needed when the server is not on 80.
+- **Local folder or share** — the same two files in a folder, mapped drive or
+  `\\server\share` this machine can already read. No web server and no port:
+  ShellTab serves the directory to itself on a loopback port it picks.
+  **Browse…** opens a folder picker.
 
-The choice persists in `update-source.json` under the app's user-data directory,
-so a machine with no path to github.com still updates.
+The choice persists in `update-source.json` under the app's user-data directory.
+A source saved by a pre-1.7.0 build (`github`) migrates to the default feed on
+first launch.
 
-Either way the feed is just `latest.yml` plus the installer, copied out of
-`dist/`:
+Publishing is a copy of `latest.yml` plus the installer into the served
+directory — `npm run publish:lan` builds and does exactly that:
 
 ```bash
-install -Dm644 "dist/ShellTab Setup 1.6.1.exe" /srv/shelltab/ShellTab-Setup-1.6.1.exe
-install -Dm644 dist/latest.yml /srv/shelltab/latest.yml
+install -m 644 -D dist/latest.yml dist/ShellTab-Setup-1.8.1.exe \
+  dist/ShellTab-Setup-1.8.1.exe.blockmap -t /var/www/html/shelltab/
 ```
+
+The NSIS artifact is named with hyphens (`ShellTab-Setup-1.8.1.exe`) to match
+the URL `latest.yml` records; electron-builder's default spelling uses spaces
+and made every HTTP check 404.
 
 The rename matters for an HTTP feed: electron-builder writes the exe with
 spaces but records the hyphenated name in `latest.yml`, so a plain web server
@@ -183,7 +207,7 @@ shelltab/
   main.js              Electron main process (PTY management, FTP, saved hosts)
   sshmanager.js        Native SSH + SFTP backend (ssh2), host-key verification
   keepalive.js         Power-save blocker, SSH keepalive and anti-idle settings
-  updater.js           electron-updater wiring against GitHub Releases
+  updater.js           electron-updater wiring against the LAN/folder feed
   smoketest.js         Headless UI test harness (not shipped)
   preload.js           Context bridge (IPC between main and renderer)
   renderer/
@@ -208,7 +232,7 @@ shelltab/
 - **[basic-ftp](https://github.com/patrickjuchli/basic-ftp)** - FTP/FTPS client
 - **[esbuild](https://esbuild.github.io/)** - Fast JS bundler for the renderer
 - **[electron-builder](https://www.electron.build/)** - Packaging and distribution
-- **[electron-updater](https://www.electron.build/auto-update)** - In-app updates from GitHub Releases
+- **[electron-updater](https://www.electron.build/auto-update)** - In-app updates from a LAN, Tailscale or folder feed
 
 ### Security
 - Renderer runs with `contextIsolation: true` and `nodeIntegration: false`
@@ -230,6 +254,7 @@ shelltab/
 | `npm run dist:win` | Build Windows NSIS installer |
 | `npm run dist:linux` | Build Linux AppImage + .deb |
 | `npm run dist:all` | Build for all platforms |
+| `npm run publish:lan` | Build the Windows installer and install `latest.yml` + the `.exe` into the served update directory |
 | `npm run smoketest` | Headless end-to-end test of the SSH/SFTP UI (needs `xvfb` and an sshd on 127.0.0.1; the password-retry probe wants the `sttest` user described in `smoketest.js`) |
 
 ## Notes

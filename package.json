@@ -1,6 +1,6 @@
 {
   "name": "shelltab",
-  "version": "1.6.1",
+  "version": "1.8.1",
   "description": "Tabbed terminal with native SSH, an SFTP browser, FTP and timed nudges",
   "main": "main.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "dist:win": "npm run build:renderer && electron-builder --win",
     "dist:linux": "npm run build:renderer && electron-builder --linux",
     "dist:all": "npm run build:renderer && electron-builder --win --linux",
+    "publish:lan": "npm run dist:win && install -m 644 -D dist/latest.yml dist/ShellTab-Setup-$npm_package_version.exe dist/ShellTab-Setup-$npm_package_version.exe.blockmap -t /var/www/html/shelltab/",
     "smoketest": "npm run build:renderer && SHELLTAB_SELFTEST=1 xvfb-run -a electron . --no-sandbox --user-data-dir=\"${TMPDIR:-/tmp}/shelltab-smoketest-$$\""
   },
   "build": {
@@ -43,6 +44,7 @@
       "icon": "icon.png"
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
@@ -58,9 +60,8 @@
     },
     "publish": [
       {
-        "provider": "github",
-        "owner": "tpawley2001",
-        "repo": "shelltab"
+        "provider": "generic",
+        "url": "http://10.0.2.158/shelltab/"
       }
     ]
   },

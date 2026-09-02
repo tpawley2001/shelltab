@@ -1,11 +1,13 @@
 // ── Remote update ──
-// electron-updater, pointed at one of three feeds: the GitHub Releases named by
-// the publish block in package.json, any directory served over the LAN or
-// Tailscale holding latest.yml + the installer, or a plain folder / UNC share
-// holding the same two files. The folder case needs no web server: ShellTab
-// serves the directory to itself on a loopback port it picks, so nobody has to
-// stand one up or remember a port number. The choice persists in
-// update-source.json, so a machine with no path to github.com still updates.
+// electron-updater, pointed at a directory holding latest.yml + the installer.
+// That directory is served either over HTTP — the LAN/Tailscale web server that
+// every other self-updating app here already updates from — or straight off a
+// folder / mapped drive / UNC share. The folder case needs no web server:
+// ShellTab serves the directory to itself on a loopback port it picks, so
+// nobody has to stand one up or remember a port number. GitHub Releases is not
+// in this path at all: builds are published to the same web root as the rest,
+// so an update never depends on reaching github.com or on a release existing
+// there. The choice persists in update-source.json.
 const { app, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -18,14 +20,25 @@ try {
   autoUpdater = null; // dependency missing — every call below degrades to a message
 }
 
-// Matches the build.publish block in package.json — the fallback when no
-// local feed is configured.
-const GITHUB_FEED = { provider: 'github', owner: 'tpawley2001', repo: 'shelltab' };
+// The house update route, matching build.publish in package.json and the
+// /<app>/ layout the other self-updating apps use on the same web server.
+const DEFAULT_FEED = 'http://10.0.2.158/shelltab/';
 
-// A box that never reaches github.com can still update: point it at a directory
-// served over the LAN or Tailscale ('url'), or at a folder, mapped drive or
-// \\server\share this machine can already read ('folder').
-const SOURCE_DEFAULTS = { mode: 'github', url: '', folder: '' };
+// Two ways to reach a feed: a directory served over the LAN or Tailscale
+// ('url', the default), or a folder, mapped drive or \\server\share this
+// machine can already read ('folder').
+const SOURCE_DEFAULTS = { mode: 'url', url: DEFAULT_FEED, folder: '' };
+
+// 'github' is what installs before 1.7.0 saved, and an empty url would leave a
+// box with no feed at all — both land back on the default route.
+function normalizeSource(src) {
+  const out = { ...SOURCE_DEFAULTS, ...src };
+  if (out.mode !== 'folder') {
+    out.mode = 'url';
+    if (!String(out.url || '').trim()) out.url = DEFAULT_FEED;
+  }
+  return out;
+}
 
 let getWindow = () => null;
 let source = { ...SOURCE_DEFAULTS };
@@ -132,11 +145,13 @@ function sourceFile() {
 }
 
 function loadSource() {
+  let saved = {};
   try {
-    source = { ...SOURCE_DEFAULTS, ...JSON.parse(fs.readFileSync(sourceFile(), 'utf-8')) };
-  } catch {
-    source = { ...SOURCE_DEFAULTS };
-  }
+    saved = JSON.parse(fs.readFileSync(sourceFile(), 'utf-8'));
+  } catch {}
+  source = normalizeSource(saved);
+  // Rewrite a migrated file now, so the next launch reads a current one.
+  if (saved.mode !== source.mode || saved.url !== source.url) persist();
   return source;
 }
 
@@ -158,13 +173,10 @@ async function applyFeed() {
     }
     stopFolderServer();
     autoUpdater.disableDifferentialDownload = false;
-    if (source.mode === 'url' && source.url) {
-      // Trailing slash matters: electron-builder resolves latest.yml against it.
-      const url = source.url.endsWith('/') ? source.url : `${source.url}/`;
-      autoUpdater.setFeedURL({ provider: 'generic', url });
-    } else {
-      autoUpdater.setFeedURL(GITHUB_FEED);
-    }
+    // Trailing slash matters: electron-builder resolves latest.yml against it.
+    const base = String(source.url || '').trim() || DEFAULT_FEED;
+    const url = base.endsWith('/') ? base : `${base}/`;
+    autoUpdater.setFeedURL({ provider: 'generic', url });
   } catch (err) {
     send({ status: 'error', message: `Bad update source: ${err.message}` });
   }
@@ -174,11 +186,15 @@ function getSource() {
   return { ...source };
 }
 
-async function setSource(patch) {
-  source = { ...source, ...patch };
+function persist() {
   try {
     fs.writeFileSync(sourceFile(), JSON.stringify(source, null, 2));
   } catch {}
+}
+
+async function setSource(patch) {
+  source = normalizeSource({ ...source, ...patch });
+  persist();
   send({ status: 'idle', message: '', source: getSource() });
   await applyFeed();
   return getSource();

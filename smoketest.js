@@ -206,7 +206,7 @@ function run(mainWindow, app) {
          document.getElementById('update-close').click();
          return { ok: open && /Installed version \\d+\\.\\d+\\.\\d+/.test(txt), open, txt, status };
        })()`);
-    await probe('update source switches between GitHub and a local feed',
+    await probe('update source defaults to the LAN feed and takes another server',
       `(async () => {
          const before = await window.api.updateSourceGet();
          const lan = await window.api.updateSourceSet({ mode: 'url', url: 'http://127.0.0.1:8099/shelltab' });
@@ -216,8 +216,22 @@ function run(mainWindow, app) {
          const back = await window.api.updateSourceSet(before);
          document.getElementById('update-close').click();
          return {
-           ok: lan.mode === 'url' && shown && back.mode === before.mode,
-           lan: lan.url, urlFieldShown: shown, restored: back.mode,
+           ok: before.mode === 'url' && before.url.startsWith('http://')
+               && before.url.endsWith('/shelltab/')
+               && lan.mode === 'url' && shown && back.url === before.url,
+           deflt: before.url, lan: lan.url, urlFieldShown: shown, restored: back.url,
+         };
+       })()`);
+    // A stored 'github' source is what every pre-1.7 install carries; it has to
+    // land back on the LAN feed rather than leaving the box with no route.
+    await probe('a saved GitHub source migrates to the LAN feed',
+      `(async () => {
+         const before = await window.api.updateSourceGet();
+         const migrated = await window.api.updateSourceSet({ mode: 'github', url: '' });
+         const back = await window.api.updateSourceSet(before);
+         return {
+           ok: migrated.mode === 'url' && migrated.url === before.url,
+           mode: migrated.mode, url: migrated.url,
          };
        })()`);
     // Folder mode has to work with no web server in sight, so the probe points
@@ -273,7 +287,15 @@ function run(mainWindow, app) {
     await probe('shell-integration bootstrap is hidden from the user',
       `(async () => {
          const text = document.querySelector('.term-wrapper.active').innerText;
-         return { ok: !/PROMPT_COMMAND|ST_READY/.test(text), leaked: /PROMPT_COMMAND|ST_READY/.test(text) };
+         return { ok: !/PROMPT_COMMAND|ST_READY|ST_BOOT_/.test(text), leaked: /PROMPT_COMMAND|ST_READY|ST_BOOT_/.test(text) };
+       })()`);
+
+    // Hiding the bootstrap used to hide the login banner with it.
+    await probe('login banner survives the shell-integration bootstrap',
+      `(async () => {
+         const text = document.querySelector('.term-wrapper.active').innerText;
+         const banner = /Welcome to Ubuntu|System information as of|Usage of \\//.test(text);
+         return { ok: banner, banner, head: text.replace(/\\s+/g, ' ').trim().slice(0, 90) };
        })()`);
 
     await probe('SFTP browser auto-opened on the live session',
@@ -497,6 +519,145 @@ function run(mainWindow, app) {
          document.getElementById('prompt-cancel').click();
          return { ok: prefilled && rejected, prefilled, rejected };
        })()`);
+
+    // ── Reconnect after the server goes away ──
+
+    await probe('a dropped SSH session offers Reconnect in the same tab',
+      `(async () => {
+         const sshTab = [...document.querySelectorAll('.tab')].find(t => t.classList.contains('ssh') && !t.classList.contains('disconnected'));
+         if (!sshTab) return { ok: false, reason: 'no live ssh tab' };
+         sshTab.click();
+         await new Promise(r => setTimeout(r, 400));
+         const tabsBefore = document.querySelectorAll('.tab').length;
+         const tab = window.__testActiveTab();
+         const oldSshId = tab.sshId;
+         // Standing in for the server going away: end the remote shell.
+         window.api.sshInput(tab.sshId, 'exit\\r');
+         for (let i = 0; i < 60 && tab.sshId !== null; i++) await new Promise(r => setTimeout(r, 100));
+         const bar = document.querySelector('.term-wrapper.active .reconnect-bar');
+         const shown = !!bar && !bar.classList.contains('hidden');
+         const btn = !!bar?.querySelector('.reconnect-btn');
+         return {
+           ok: shown && btn && tab.sshId === null && sshTab.classList.contains('disconnected')
+             && document.querySelectorAll('.tab').length === tabsBefore,
+           shown, btn, dropped: tab.sshId === null, oldSshId,
+           tabsBefore, tabsAfter: document.querySelectorAll('.tab').length,
+           msg: bar?.querySelector('.reconnect-msg')?.textContent,
+         };
+       })()`);
+
+    await probe('Reconnect dials the same host back into the same tab',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const tabId = tab.tabId;
+         const scrollbackBefore = document.querySelector('.term-wrapper.active').innerText.length;
+         const tabsBefore = document.querySelectorAll('.tab').length;
+         document.querySelector('.term-wrapper.active .reconnect-bar .reconnect-btn').click();
+         for (let i = 0; i < 80 && tab.sshId === null; i++) await new Promise(r => setTimeout(r, 100));
+         await new Promise(r => setTimeout(r, 1500));
+         const bar = document.querySelector('.term-wrapper.active .reconnect-bar');
+         const active = document.querySelector('.tab.active');
+         const screen = document.querySelector('.term-wrapper.active').innerText;
+         return {
+           ok: tab.sshId !== null && window.__testActiveTab().tabId === tabId
+             && bar.classList.contains('hidden')
+             && !active.classList.contains('disconnected')
+             && document.querySelectorAll('.tab').length === tabsBefore
+             && scrollbackBefore > 0
+             && !/Connection failed/.test(screen),
+           sshId: tab.sshId, sameTab: window.__testActiveTab().tabId === tabId,
+           barHidden: bar.classList.contains('hidden'),
+           tabsAfter: document.querySelectorAll('.tab').length,
+           screenTail: screen.replace(/\\s+/g, ' ').trim().slice(-90),
+         };
+       })()`);
+
+    await probe('a restored session tab reconnects in place, local pty and all',
+      `(async () => {
+         const tabsBefore = document.querySelectorAll('.tab').length;
+         await window.__testRestorePlaceholder({
+           label: 'restored-probe',
+           session: { host: '127.0.0.1', port: 22, user: '${os.userInfo().username}', privateKeyPath: '${path.join(os.homedir(), '.ssh', 'solar_key')}' },
+         });
+         await new Promise(r => setTimeout(r, 600));
+         const tab = window.__testActiveTab();
+         const startedLocal = tab.kind === 'local';
+         const bar = document.querySelector('.term-wrapper.active .reconnect-bar');
+         const offered = !!bar && !bar.classList.contains('hidden');
+         const tabId = tab.tabId;
+         bar.querySelector('.reconnect-btn').click();
+         for (let i = 0; i < 80 && tab.sshId === null; i++) await new Promise(r => setTimeout(r, 100));
+         await new Promise(r => setTimeout(r, 1200));
+         const active = document.querySelector('.tab.active');
+         return {
+           ok: startedLocal && offered && tab.kind === 'ssh' && tab.sshId != null
+             && tab.termId === null && window.__testActiveTab().tabId === tabId
+             && active.classList.contains('ssh') && !active.classList.contains('local')
+             && active.querySelector('.tab-kind').textContent === 'SSH'
+             && document.querySelectorAll('.tab').length === tabsBefore + 1,
+           startedLocal, offered, kind: tab.kind, sshId: tab.sshId, termId: tab.termId,
+           badge: active.querySelector('.tab-kind').textContent,
+           tabsBefore, tabsAfter: document.querySelectorAll('.tab').length,
+         };
+       })()`);
+
+    // ── Reconnect borrows credentials back from the Quicklink ──
+    // The saved app state deliberately never holds a password, so a restored
+    // tab only knows its quicklinkId. Reconnect must go and fetch the rest.
+
+    await probe('a credential-less session refills from its Quicklink',
+      `(async () => {
+         const saved = await window.api.saveQuicklink({
+           type: 'ssh', label: 'st-hydrate-probe', host: '10.99.99.99', port: 2222,
+           user: 'stuser', password: 'st-secret', auth: 'password', shellIntegration: true,
+         });
+         const byId = await window.__testHydrateQuicklink({ host: '10.99.99.99', port: 2222, user: 'stuser', quicklinkId: saved.id });
+         // No id at all: the host it dials still finds the Quicklink.
+         const byHost = await window.__testHydrateQuicklink({ host: '10.99.99.99', port: 2222, user: 'stuser' });
+         // A password already in hand is never second-guessed.
+         const typed = await window.__testHydrateQuicklink({ host: '10.99.99.99', port: 2222, user: 'stuser', password: 'typed-in' });
+         // A different host must not borrow this one's password.
+         const other = await window.__testHydrateQuicklink({ host: '10.99.99.98', port: 2222, user: 'stuser' });
+         await window.api.deleteQuicklink(saved.id);
+         return {
+           ok: byId.password === 'st-secret' && byHost.password === 'st-secret'
+             && byHost.quicklinkId === saved.id && typed.password === 'typed-in'
+             && !other.password,
+           byId: byId.password, byHost: byHost.password, typed: typed.password, other: other.password || null,
+         };
+       })()`);
+
+    if (hasTestUser()) {
+      await probe('Reconnect uses the Quicklink password instead of prompting',
+        `(async () => {
+           const saved = await window.api.saveQuicklink({
+             type: 'ssh', label: 'st-reconnect-probe', host: '127.0.0.1', port: 22,
+             user: 'sttest', password: 'sttest-pass', auth: 'password', shellIntegration: true,
+           });
+           // Exactly what persistState() writes for a Quicklink tab: no password.
+           await window.__testRestorePlaceholder({
+             label: 'st-reconnect-probe',
+             session: { host: '127.0.0.1', port: 22, user: 'sttest', useAgent: false, quicklinkId: saved.id },
+           });
+           await new Promise(r => setTimeout(r, 600));
+           const tab = window.__testActiveTab();
+           document.querySelector('.term-wrapper.active .reconnect-bar .reconnect-btn').click();
+           for (let i = 0; i < 80 && tab.sshId === null; i++) await new Promise(r => setTimeout(r, 100));
+           await new Promise(r => setTimeout(r, 1200));
+           const modal = document.getElementById('ssh-prompt-modal');
+           const prompted = !modal.classList.contains('hidden');
+           if (prompted) document.getElementById('ssh-prompt-cancel').click();
+           const screen = document.querySelector('.term-wrapper.active').innerText;
+           await window.api.deleteQuicklink(saved.id);
+           return {
+             ok: !prompted && tab.sshId != null && !/Connection failed/.test(screen),
+             prompted, sshId: tab.sshId,
+             screenTail: screen.replace(/\\s+/g, ' ').trim().slice(-90),
+           };
+         })()`);
+    } else {
+      skip('Reconnect uses the Quicklink password instead of prompting', 'no sttest user (see header for setup)');
+    }
 
     console.log(`\n${passed}/${passed + failed} checks passed${skipped ? ` (${skipped} skipped)` : ''}`);
     app.exit(failed ? 1 : 0);
