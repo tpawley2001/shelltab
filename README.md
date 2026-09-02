@@ -255,7 +255,7 @@ shelltab/
 | `npm run dist:linux` | Build Linux AppImage + .deb |
 | `npm run dist:all` | Build for all platforms |
 | `npm run publish:lan` | Build the Windows installer and install `latest.yml` + the `.exe` into the served update directory |
-| `npm run smoketest` | Headless end-to-end test of the SSH/SFTP UI (needs `xvfb` and an sshd on 127.0.0.1; the password-retry probe wants the `sttest` user described in `smoketest.js`) |
+| `npm run smoketest` | Headless end-to-end test of the SSH/SFTP UI (needs `xvfb` and an sshd on 127.0.0.1; the password probes want a throwaway account in `SHELLTAB_TEST_USER`/`SHELLTAB_TEST_PASS` and skip without one — see the header of `smoketest.js`) |
 
 ## Notes
 

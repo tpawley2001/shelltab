@@ -1,26 +1,61 @@
 // ── Smoke test ──
 // Drives the real UI in a headless window and asserts the SSH + SFTP path
 // works end to end. Requires an sshd on 127.0.0.1 that accepts one of the
-// keys in ~/.ssh. The password-retry probe additionally wants a local user
-// "sttest" with password "sttest-pass" and that same key authorized; without
-// it, that probe reports SKIP rather than FAIL. Set up with:
+// keys in ~/.ssh.
+//
+// Nothing about the machine it runs on is hard-coded here: the key is the
+// first one found in ~/.ssh (or $SHELLTAB_TEST_KEY), and the probes that need
+// a password log in as $SHELLTAB_TEST_USER / $SHELLTAB_TEST_PASS -- a throwaway
+// local account you set up yourself. Leave those unset and those probes report
+// SKIP rather than FAIL. Never point them at an account you care about; the
+// password is passed to a local sshd in the clear.
 //
 //   sudo useradd -m -s /bin/bash sttest
-//   echo 'sttest:sttest-pass' | sudo chpasswd
-//   sudo install -D -m 600 -o sttest ~/.ssh/solar_key.pub ~sttest/.ssh/authorized_keys
+//   echo "sttest:$PASS" | sudo chpasswd
+//   sudo install -D -m 600 -o sttest ~/.ssh/<key>.pub ~sttest/.ssh/authorized_keys
 //
 // Run with:
 //
 //   npm run smoketest
+//   SHELLTAB_TEST_USER=sttest SHELLTAB_TEST_PASS=… npm run smoketest
 //
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const TEST_USER = process.env.SHELLTAB_TEST_USER || '';
+const TEST_PASS = process.env.SHELLTAB_TEST_PASS || '';
+
+// The key to authenticate with: named explicitly, or whichever private key in
+// ~/.ssh has a .pub sibling -- the same discovery the app itself does, so the
+// test never has to know what this machine calls its keys.
+function testKey() {
+  if (process.env.SHELLTAB_TEST_KEY) return process.env.SHELLTAB_TEST_KEY;
+  const dir = path.join(os.homedir(), '.ssh');
+  const names = fs.readdirSync(dir).filter((f) => fs.existsSync(path.join(dir, `${f}.pub`)));
+  if (!names.length) throw new Error('no usable key in ~/.ssh');
+  // Whichever of them the local sshd actually accepts. Trying is cheaper than
+  // guessing, and it keeps this machine's key names out of the source.
+  for (const name of names) {
+    const p = path.join(dir, name);
+    try {
+      require('child_process').execSync(
+        `ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i '${p}' ${os.userInfo().username}@127.0.0.1 true`,
+        { timeout: 10000, stdio: 'ignore' }
+      );
+      return p;
+    } catch {}
+  }
+  return path.join(dir, names[0]);
+}
+
+const TEST_KEY = testKey();
+
 function hasTestUser() {
+  if (!TEST_USER || !TEST_PASS) return false;
   try {
     require('child_process').execSync(
-      'ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i ~/.ssh/solar_key sttest@127.0.0.1 true',
+      `ssh -o BatchMode=yes -o StrictHostKeyChecking=no -i '${TEST_KEY}' ${TEST_USER}@127.0.0.1 true`,
       { timeout: 10000, stdio: 'ignore' }
     );
     return true;
@@ -258,7 +293,7 @@ function run(mainWindow, app) {
     try { fs.rmSync(feedDir, { recursive: true, force: true }); } catch {}
 
     await probe('key discovery finds non-standard key names',
-      `(async () => { const keys = await window.api.sshFindKeys(); return { ok: keys.some(k => k.endsWith('solar_key')), keys: keys.map(k => k.split('/').pop()) }; })()`);
+      `(async () => { const keys = await window.api.sshFindKeys(); return { ok: keys.includes('${TEST_KEY}'), keys: keys.map(k => k.split('/').pop()) }; })()`);
 
     await probe('live SSH tab connects via the connect dialog',
       `(async () => {
@@ -269,7 +304,7 @@ function run(mainWindow, app) {
          document.getElementById('ssh-user').value = '${os.userInfo().username}';
          const auth = document.getElementById('ssh-auth');
          auth.value = 'key'; auth.dispatchEvent(new Event('change'));
-         document.getElementById('ssh-key').value = '${path.join(os.homedir(), '.ssh', 'solar_key')}';
+         document.getElementById('ssh-key').value = '${TEST_KEY}';
          document.getElementById('ssh-connect-btn').click();
          await new Promise(r => setTimeout(r, 5000));
          const tabs = [...document.querySelectorAll('.tab')];
@@ -352,7 +387,7 @@ function run(mainWindow, app) {
            document.getElementById('btn-new-ssh').click();
            await new Promise(r => setTimeout(r, 300));
            document.getElementById('ssh-host').value = '127.0.0.1';
-           document.getElementById('ssh-user').value = 'sttest';
+           document.getElementById('ssh-user').value = '${TEST_USER}';
            const auth = document.getElementById('ssh-auth');
            auth.value = 'password'; auth.dispatchEvent(new Event('change'));
            document.getElementById('ssh-pass').value = '';
@@ -372,7 +407,7 @@ function run(mainWindow, app) {
              document.getElementById('ssh-prompt-cancel')?.click();
              return { ok: false, reprompted };
            }
-           modal.querySelector('.prompt-field input').value = 'sttest-pass';
+           modal.querySelector('.prompt-field input').value = '${TEST_PASS}';
            document.getElementById('ssh-prompt-ok').click();
            await new Promise(r => setTimeout(r, 5000));
            const active = document.querySelector('.tab.active');
@@ -383,7 +418,7 @@ function run(mainWindow, app) {
            return { ok: reprompted && connected, reprompted, connected };
          })()`);
     } else {
-      skip('wrong password re-prompts instead of killing the connection', 'no sttest user (see header for setup)');
+      skip('wrong password re-prompts instead of killing the connection', 'SHELLTAB_TEST_USER/PASS not set (see header)');
     }
 
     await probe('local shell echoes a command',
@@ -577,7 +612,7 @@ function run(mainWindow, app) {
          const tabsBefore = document.querySelectorAll('.tab').length;
          await window.__testRestorePlaceholder({
            label: 'restored-probe',
-           session: { host: '127.0.0.1', port: 22, user: '${os.userInfo().username}', privateKeyPath: '${path.join(os.homedir(), '.ssh', 'solar_key')}' },
+           session: { host: '127.0.0.1', port: 22, user: '${os.userInfo().username}', privateKeyPath: '${TEST_KEY}' },
          });
          await new Promise(r => setTimeout(r, 600));
          const tab = window.__testActiveTab();
@@ -632,12 +667,12 @@ function run(mainWindow, app) {
         `(async () => {
            const saved = await window.api.saveQuicklink({
              type: 'ssh', label: 'st-reconnect-probe', host: '127.0.0.1', port: 22,
-             user: 'sttest', password: 'sttest-pass', auth: 'password', shellIntegration: true,
+             user: '${TEST_USER}', password: '${TEST_PASS}', auth: 'password', shellIntegration: true,
            });
            // Exactly what persistState() writes for a Quicklink tab: no password.
            await window.__testRestorePlaceholder({
              label: 'st-reconnect-probe',
-             session: { host: '127.0.0.1', port: 22, user: 'sttest', useAgent: false, quicklinkId: saved.id },
+             session: { host: '127.0.0.1', port: 22, user: '${TEST_USER}', useAgent: false, quicklinkId: saved.id },
            });
            await new Promise(r => setTimeout(r, 600));
            const tab = window.__testActiveTab();
@@ -656,7 +691,7 @@ function run(mainWindow, app) {
            };
          })()`);
     } else {
-      skip('Reconnect uses the Quicklink password instead of prompting', 'no sttest user (see header for setup)');
+      skip('Reconnect uses the Quicklink password instead of prompting', 'SHELLTAB_TEST_USER/PASS not set (see header)');
     }
 
     console.log(`\n${passed}/${passed + failed} checks passed${skipped ? ` (${skipped} skipped)` : ''}`);
