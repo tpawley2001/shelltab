@@ -55,6 +55,10 @@ cursor — **Tab** or **Right arrow** takes it, anything else ignores it.
 - Multi-select, drag-and-drop upload from the desktop, and live transfer progress
 - Sizes, timestamps and `rwxr-xr-x` permissions for every entry
 - Renames, permission changes and folder creation use an in-app dialog with validation (Electron has no `window.prompt`)
+- **Paste an image** (`Ctrl+V`) straight into an SSH tab to upload a screenshot or copied image to the
+  terminal's current remote directory; the uploaded filename is typed in at the cursor. On a local tab
+  the image is saved to disk instead and its path is typed in. Falls back to normal text paste when the
+  clipboard holds no image.
 
 ### Resizable Sidebars
 Both the SFTP browser and the FTP panel have a drag grip on their inner edge.
@@ -155,11 +159,11 @@ Publishing is a copy of `latest.yml` plus the installer into the served
 directory — `npm run publish:lan` builds and does exactly that:
 
 ```bash
-install -m 644 -D dist/latest.yml dist/ShellTab-Setup-1.8.1.exe \
-  dist/ShellTab-Setup-1.8.1.exe.blockmap -t /var/www/html/shelltab/
+install -m 644 -D dist/latest.yml dist/ShellTab-Setup-1.9.0.exe \
+  dist/ShellTab-Setup-1.9.0.exe.blockmap -t /var/www/html/shelltab/
 ```
 
-The NSIS artifact is named with hyphens (`ShellTab-Setup-1.8.1.exe`) to match
+The NSIS artifact is named with hyphens (`ShellTab-Setup-1.9.0.exe`) to match
 the URL `latest.yml` records; electron-builder's default spelling uses spaces
 and made every HTTP check 404.
 

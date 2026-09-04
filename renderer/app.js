@@ -358,6 +358,26 @@ async function createTab(opts = {}) {
     return true;
   });
 
+  // A pasted image (a screenshot, a copied file preview) arrives on the OS
+  // clipboard as a bitmap, not text, so navigator.clipboard.readText() alone
+  // would silently do nothing with it. Check for one first: on an SSH tab it
+  // is uploaded to the terminal's current remote directory and its name is
+  // typed in; on a local tab it is saved to disk and its path is typed in.
+  async function pasteClipboard() {
+    const img = await window.api.clipboardReadImage().catch(() => null);
+    if (img?.path) {
+      if (tab.kind === 'ssh' && tab.sshId != null) {
+        const name = await sftp.pasteImage(tab.sshId, img.path);
+        if (name) tabSend(tab, name);
+      } else {
+        tabSend(tab, img.path);
+      }
+      return;
+    }
+    const text = await navigator.clipboard.readText().catch(() => '');
+    if (text) tabSend(tab, text);
+  }
+
   xterm.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     // Tab and Right arrow take the suggestion when there is one; with none
@@ -372,11 +392,11 @@ async function createTab(opts = {}) {
       return false;
     }
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') {
-      navigator.clipboard.readText().then((text) => text && tabSend(tab, text)).catch(() => {});
+      pasteClipboard();
       return false;
     }
     if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
-      navigator.clipboard.readText().then((text) => text && tabSend(tab, text)).catch(() => {});
+      pasteClipboard();
       return false;
     }
     if (e.ctrlKey && !e.shiftKey && e.key === 'c' && xterm.hasSelection()) {
@@ -393,7 +413,7 @@ async function createTab(opts = {}) {
       xterm.clearSelection();
       showToast('Clipboard', 'Copied selection');
     } else {
-      navigator.clipboard.readText().then((text) => text && tabSend(tab, text)).catch(() => {});
+      pasteClipboard();
     }
   });
 

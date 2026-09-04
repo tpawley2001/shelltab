@@ -272,6 +272,14 @@ async function uploadPaths(sshId, localPaths) {
   refresh();
 }
 
+// Clipboard image paste: same transfer as uploadPaths, but hands back the
+// uploaded name so the caller can drop it into the terminal at the cursor.
+async function pasteImage(sshId, localPath) {
+  const name = localPath.split(/[/\\]/).pop();
+  await uploadPaths(sshId, [localPath]);
+  return name;
+}
+
 function onProgress(sshId, p) {
   if (sshId !== activeId) return;
   const wrap = document.getElementById('sftp-transfer');
@@ -423,4 +431,4 @@ function init(opts = {}) {
   window.api.onSftpProgress(onProgress);
 }
 
-module.exports = { init, setActive, remove, notifyCwd, show, hide, toggle, isOpen, refresh };
+module.exports = { init, setActive, remove, notifyCwd, show, hide, toggle, isOpen, refresh, pasteImage };

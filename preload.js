@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('api', {
   ftpPwd: (id) => ipcRenderer.invoke('ftp:pwd', id),
   ftpDisconnect: (id) => ipcRenderer.invoke('ftp:disconnect', id),
 
+  // Clipboard
+  clipboardReadImage: () => ipcRenderer.invoke('clipboard:readImage'),
+
   // Dialogs
   saveFileDialog: (name) => ipcRenderer.invoke('dialog:saveFile', name),
   openFileDialog: (opts) => ipcRenderer.invoke('dialog:openFile', opts),

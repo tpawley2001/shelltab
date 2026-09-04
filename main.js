@@ -350,6 +350,22 @@ ipcMain.handle('ssh:defaultUser', () => {
   try { return os.userInfo().username; } catch { return ''; }
 });
 
+// ── Clipboard image paste ──
+// A screenshot or copied image lives on the OS clipboard as a bitmap, not a
+// file, so a paste has to materialize one before it can be typed into the
+// terminal or handed to SFTP.
+const { clipboard } = require('electron');
+
+ipcMain.handle('clipboard:readImage', () => {
+  const img = clipboard.readImage();
+  if (img.isEmpty()) return null;
+  const dir = path.join(os.tmpdir(), 'shelltab-paste');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `paste-${Date.now()}.png`);
+  fs.writeFileSync(file, img.toPNG());
+  return { path: file };
+});
+
 // ── Saved hosts (passwords encrypted via OS keychain) ──
 
 const hostsFile = path.join(app.getPath('userData'), 'saved-hosts.json');
