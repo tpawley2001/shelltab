@@ -10,6 +10,17 @@ const inputEl = () => document.getElementById('prompt-input');
 const errorEl = () => document.getElementById('prompt-error');
 
 let resolver = null;
+// Whatever held the keyboard when the dialog went up -- normally the terminal
+// the user was typing into. Hiding a focused element drops focus on <body>, so
+// without putting it back by hand the answer to a dialog costs a click.
+let previousFocus = null;
+
+function restoreFocus() {
+  const el = previousFocus;
+  previousFocus = null;
+  if (!el || !el.isConnected || el.offsetParent === null) return;
+  requestAnimationFrame(() => el.focus());
+}
 
 function finish(value) {
   if (!resolver) return;
@@ -18,6 +29,7 @@ function finish(value) {
   modal().classList.add('hidden');
   modal().classList.remove('confirm');
   document.removeEventListener('keydown', onKeydown, true);
+  restoreFocus();
   resolve(value);
 }
 
@@ -47,7 +59,9 @@ function submit() {
 function open({ title, message, value = '', select = false, confirm = false, validate, error }) {
   // One at a time; a second request answers itself with "cancelled" rather
   // than clobbering the dialog a user is mid-way through.
+  const priorFocus = resolver ? previousFocus : document.activeElement;
   if (resolver) finish(null);
+  previousFocus = priorFocus;
 
   titleEl().textContent = title || 'Input';
   messageEl().textContent = message || '';

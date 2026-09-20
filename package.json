@@ -1,6 +1,6 @@
 {
   "name": "shelltab",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Tabbed terminal with native SSH, an SFTP browser, FTP and timed nudges",
   "main": "main.js",
   "scripts": {
@@ -17,6 +17,7 @@
   "build": {
     "appId": "com.shelltab.app",
     "productName": "ShellTab",
+    "copyright": "Copyright © 2026 Hillyard Tech",
     "files": [
       "main.js",
       "preload.js",

@@ -201,6 +201,7 @@ async function connectSsh(tab, session, { fresh = false } = {}) {
     tab.xterm.write(`\r\n\x1b[31mConnection failed: ${res.error}\x1b[0m\r\n`);
     tab.failed = true;
     showReconnect(tab, session, 'Connection failed');
+    if (activeTabId === tab.tabId) focusActiveTerm();
     persistState();
     return false;
   }
@@ -231,6 +232,9 @@ async function connectSsh(tab, session, { fresh = false } = {}) {
     // whatever the user already had open.
     if (fresh) sftp.show();
     sftp.setActive(tab.sshId, tab.label);
+    // Dialling in may have gone through a password or 2FA dialog, which left
+    // the keyboard on a field that no longer exists. Type straight away.
+    focusActiveTerm();
   }
 
   persistState();
@@ -267,6 +271,29 @@ function hideReconnect(tab) {
   tab.pendingSession = null;
   tab.reconnectEl?.classList.add('hidden');
   tab.tabEl?.classList.remove('disconnected');
+}
+
+// ── Keyboard focus ──
+// Every dialog in the app takes the keyboard while it is up, and hiding the
+// element that holds focus hands it to <body>, not back to whatever was typing
+// before. A tab that just dialled in then sits there looking ready and eats the
+// first thing typed until the user clicks it. Anything that closes a dialog, and
+// every connect, ends here instead.
+function focusActiveTerm() {
+  const settle = () => {
+    const tab = tabs.get(activeTabId);
+    if (!tab) return;
+    const el = document.activeElement;
+    // Leave a field the user moved to themselves alone -- but a field inside a
+    // dialog that has just been hidden has no layout box, and is fair game.
+    if (el && el !== document.body && !el.closest('.term-wrapper')
+        && el.offsetParent !== null
+        && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    tab.xterm.focus();
+  };
+  // A dialog that has just been hidden still has its old layout until the
+  // browser reflows; waiting a frame is what makes the caret actually return.
+  requestAnimationFrame(settle);
 }
 
 async function reconnectTab(tabId) {
@@ -941,6 +968,11 @@ function prefillFtpFromSsh() {
 
 const saveConnModal = document.getElementById('save-conn-modal');
 
+function closeSaveConnModal() {
+  saveConnModal.classList.add('hidden');
+  focusActiveTerm();
+}
+
 function showSaveConnectionDialog(type, host, user, password, command) {
   const typeEl = document.getElementById('save-conn-type');
   typeEl.value = type || 'ssh';
@@ -982,7 +1014,7 @@ document.getElementById('save-conn-save').addEventListener('click', async () => 
       command,
     };
     await window.api.saveQuicklink(data);
-    saveConnModal.classList.add('hidden');
+    closeSaveConnModal();
     showToast('Saved', `${data.label} added to Quicklinks`);
     renderQuicklinks();
     return;
@@ -998,21 +1030,17 @@ document.getElementById('save-conn-save').addEventListener('click', async () => 
     password: document.getElementById('save-conn-pass').value,
   };
   await window.api.saveQuicklink(data);
-  saveConnModal.classList.add('hidden');
+  closeSaveConnModal();
   showToast('Saved', `${data.label} added to Quicklinks`);
   renderQuicklinks();
 });
 
-document.getElementById('save-conn-cancel').addEventListener('click', () => {
-  saveConnModal.classList.add('hidden');
-});
+document.getElementById('save-conn-cancel').addEventListener('click', closeSaveConnModal);
 
-document.getElementById('save-conn-close').addEventListener('click', () => {
-  saveConnModal.classList.add('hidden');
-});
+document.getElementById('save-conn-close').addEventListener('click', closeSaveConnModal);
 
 saveConnModal.addEventListener('click', (e) => {
-  if (e.target === saveConnModal) saveConnModal.classList.add('hidden');
+  if (e.target === saveConnModal) closeSaveConnModal();
 });
 
 // ── Quicklinks Dropdown ──
@@ -1175,6 +1203,7 @@ document.getElementById('ssh-key-browse').addEventListener('click', async () => 
 
 function closeSshModal() {
   sshModal.classList.add('hidden');
+  focusActiveTerm();
 }
 
 document.getElementById('ssh-modal-close').addEventListener('click', closeSshModal);
@@ -1240,6 +1269,7 @@ function closeSshPrompt(answers) {
   activePromptId = null;
   sshPromptModal.classList.add('hidden');
   document.getElementById('ssh-prompt-fields').innerHTML = '';
+  focusActiveTerm();
 }
 
 window.api.onSshPrompt((id, payload) => {
@@ -1294,12 +1324,12 @@ document.getElementById('btn-nudges').addEventListener('click', () => {
   renderNudgeList();
 });
 
-document.getElementById('nudge-close').addEventListener('click', () => {
-  nudgeModal.classList.add('hidden');
-});
+const closeNudgeModal = () => { nudgeModal.classList.add('hidden'); focusActiveTerm(); };
+
+document.getElementById('nudge-close').addEventListener('click', closeNudgeModal);
 
 nudgeModal.addEventListener('click', (e) => {
-  if (e.target === nudgeModal) nudgeModal.classList.add('hidden');
+  if (e.target === nudgeModal) closeNudgeModal();
 });
 
 function updateNudgeTargets() {
@@ -1583,7 +1613,7 @@ kaBtn.addEventListener('click', async () => {
   keepAliveModal.classList.remove('hidden');
 });
 
-const closeKeepAlive = () => keepAliveModal.classList.add('hidden');
+const closeKeepAlive = () => { keepAliveModal.classList.add('hidden'); focusActiveTerm(); };
 document.getElementById('keepalive-close').addEventListener('click', closeKeepAlive);
 document.getElementById('keepalive-done').addEventListener('click', closeKeepAlive);
 keepAliveModal.addEventListener('click', (e) => {
@@ -1698,7 +1728,7 @@ updBtn.addEventListener('click', async () => {
   if (!state || state.status === 'idle') window.api.updateCheck();
 });
 
-const closeUpdate = () => updateModal.classList.add('hidden');
+const closeUpdate = () => { updateModal.classList.add('hidden'); focusActiveTerm(); };
 document.getElementById('update-close').addEventListener('click', closeUpdate);
 updateModal.addEventListener('click', (e) => {
   if (e.target === updateModal) closeUpdate();

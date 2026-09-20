@@ -319,6 +319,17 @@ function run(mainWindow, app) {
          };
        })()`);
 
+    // Connecting used to leave the keyboard on the dialog that had just been
+    // hidden, so the first thing typed into a fresh session went nowhere.
+    await probe('a freshly connected tab already has the keyboard',
+      `(() => {
+         const ta = document.querySelector('.term-wrapper.active textarea');
+         return {
+           ok: document.activeElement === ta && !!document.querySelector('.term-wrapper.active .xterm.focus'),
+           active: document.activeElement.tagName + '.' + document.activeElement.className,
+         };
+       })()`);
+
     await probe('shell-integration bootstrap is hidden from the user',
       `(async () => {
          const text = document.querySelector('.term-wrapper.active').innerText;
@@ -378,7 +389,28 @@ function run(mainWindow, app) {
          await new Promise(r => setTimeout(r, 2000));
          const screen = document.querySelector('.term-wrapper.active').innerText;
          const failedCleanly = /Connection failed/.test(screen);
-         return { ok: shown && fields === 1 && secret && failedCleanly, shown, fields, secret, host, failedCleanly };
+         // Dismissing the prompt must not leave the keyboard on the vanished
+         // field -- the tab it belongs to is what wants the next keystroke.
+         const refocused = document.activeElement === document.querySelector('.term-wrapper.active textarea');
+         return { ok: shown && fields === 1 && secret && failedCleanly && refocused, shown, fields, secret, host, failedCleanly, refocused };
+       })()`);
+
+    await probe('closing a dialog hands the keyboard back to the terminal',
+      `(async () => {
+         document.getElementById('btn-new-ssh').click();
+         await new Promise(r => setTimeout(r, 200));
+         document.getElementById('ssh-cancel-btn').click();
+         await new Promise(r => setTimeout(r, 200));
+         const ta = document.querySelector('.term-wrapper.active textarea');
+         const afterModal = document.activeElement === ta;
+         const p = window.__testConfirm('Keyboard back?');
+         await new Promise(r => setTimeout(r, 200));
+         const inDialog = document.activeElement.id === 'prompt-ok';
+         document.getElementById('prompt-cancel').click();
+         await p;
+         await new Promise(r => setTimeout(r, 200));
+         const afterDialog = document.activeElement === document.querySelector('.term-wrapper.active textarea');
+         return { ok: afterModal && inDialog && afterDialog, afterModal, inDialog, afterDialog };
        })()`);
 
     if (hasTestUser()) {

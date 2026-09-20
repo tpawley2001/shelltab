@@ -47,6 +47,9 @@ cursor — **Tab** or **Right arrow** takes it, anything else ignores it.
   or by host, port and user when the Quicklink was saved later. A password typed for this session still wins
 - The login banner (motd, disk usage, pending updates) stays on screen; only the shell-integration bootstrap's own
   echo is hidden
+- **The cursor lands in the session you just opened.** Connecting, dismissing a password or 2FA prompt, or
+  closing any dialog puts the keyboard straight back on the active terminal, so there is nothing to click
+  before typing (a field you moved to yourself — the FTP form, a rename box — keeps focus)
 
 ### SFTP Browser
 - A graphical file browser riding the **same** SSH connection — no second login
@@ -159,11 +162,11 @@ Publishing is a copy of `latest.yml` plus the installer into the served
 directory — `npm run publish:lan` builds and does exactly that:
 
 ```bash
-install -m 644 -D dist/latest.yml dist/ShellTab-Setup-1.9.0.exe \
-  dist/ShellTab-Setup-1.9.0.exe.blockmap -t /var/www/html/shelltab/
+install -m 644 -D dist/latest.yml dist/ShellTab-Setup-1.9.1.exe \
+  dist/ShellTab-Setup-1.9.1.exe.blockmap -t /var/www/html/shelltab/
 ```
 
-The NSIS artifact is named with hyphens (`ShellTab-Setup-1.9.0.exe`) to match
+The NSIS artifact is named with hyphens (`ShellTab-Setup-1.9.1.exe`) to match
 the URL `latest.yml` records; electron-builder's default spelling uses spaces
 and made every HTTP check 404.
 
