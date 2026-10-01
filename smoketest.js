@@ -114,6 +114,24 @@ function run(mainWindow, app) {
          return { ok: opened.length === 1 && opened[0] === 'https://example.com/login?x=1', opened };
        })()`);
 
+    await probe('clicked links (OSC 8 and plain URLs) reach window.open with the URL',
+      `(() => {
+         const tab = window.__testActiveTab();
+         const opened = [];
+         const real = window.open;
+         window.open = (u) => { opened.push(u); return null; };
+         try {
+           // The OSC 8 path (Claude Code's links) and the web-links addon's
+           // handler must both pass the real URL — a bare window.open() is
+           // about:blank to main.js and the click silently does nothing.
+           tab.xterm.options.linkHandler.activate(new MouseEvent('click'), 'https://clau.de/yourthoughts');
+           const addon = tab.xterm._addonManager._addons.map(a => a.instance).find(a => a._handler && a._linkProvider);
+           addon._handler(new MouseEvent('click'), 'https://example.com/plain');
+           tab.xterm.options.linkHandler.activate(new MouseEvent('click'), 'file:///etc/passwd');
+         } finally { window.open = real; }
+         return { ok: opened.length === 2 && opened[0] === 'https://clau.de/yourthoughts' && opened[1] === 'https://example.com/plain', opened };
+       })()`);
+
     // ── Inline command suggestions ──
 
     await probe('history outranks the built-in commands',

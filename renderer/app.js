@@ -1,6 +1,12 @@
 const { Terminal } = require('@xterm/xterm');
 const { FitAddon } = require('@xterm/addon-fit');
 const { WebLinksAddon } = require('@xterm/addon-web-links');
+
+// window.open(url) reaches main.js's setWindowOpenHandler, which hands any
+// http(s) URL to the desktop browser and never opens a window in the app.
+function openLink(uri) {
+  if (/^https?:\/\//i.test(uri)) window.open(uri);
+}
 const sftp = require('./sftp');
 const dialogs = require('./dialogs');
 const suggest = require('./suggest');
@@ -322,11 +328,18 @@ async function createTab(opts = {}) {
     scrollback: 10000,
     fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace",
     theme: TERM_THEME,
+    // OSC 8 hyperlinks (Claude Code, ls --hyperlink, gh) — xterm's default
+    // handler pops a confirm() and then calls window.open() with no URL,
+    // which main.js's open handler sees as about:blank and denies, so the
+    // click did nothing. Hand the real URL straight to window.open instead.
+    linkHandler: { activate: (e, uri) => openLink(uri) },
   });
 
   const fitAddon = new FitAddon();
   xterm.loadAddon(fitAddon);
-  xterm.loadAddon(new WebLinksAddon());
+  // Same trap for plain URLs: the addon's default handler opens a blank
+  // window first, so it needs the URL passed explicitly too.
+  xterm.loadAddon(new WebLinksAddon((e, uri) => openLink(uri)));
 
   const wrapper = document.createElement('div');
   wrapper.className = 'term-wrapper';

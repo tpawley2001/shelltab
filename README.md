@@ -52,7 +52,8 @@ cursor — **Tab** or **Right arrow** takes it, anything else ignores it.
   before typing (a field you moved to yourself — the FTP form, a rename box — keeps focus)
 
 ### Links Open on Your Computer
-Clicking a URL in any tab opens it in your local browser. For a **headless server**, ShellTab also brings back
+Clicking a URL in any tab opens it in your local browser — plain URLs and the hyperlinks programs like
+Claude Code, `gh` and `ls --hyperlink` print as link text (OSC 8). For a **headless server**, ShellTab also brings back
 links that a remote program tries to open by itself: a CLI login (`claude`, `gh auth login`), `xdg-open`,
 Python's `webbrowser`. Install the small helper on the server and set it as `$BROWSER`:
 
