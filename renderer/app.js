@@ -385,6 +385,27 @@ async function createTab(opts = {}) {
     return true;
   });
 
+  // A program on the remote asking for a browser (a CLI login, `gh auth`,
+  // anything that calls xdg-open) — the server is headless, so the
+  // `shelltab-open` helper (remote/shelltab-open, set as $BROWSER there)
+  // sends the URL back down the terminal as OSC 7717 and it opens here.
+  // Only http(s) is honoured, and a repeat inside a few seconds is dropped
+  // so a helper that fires twice doesn't open two windows.
+  xterm.parser.registerOscHandler(7717, (data) => {
+    const m = /^open;(.+)$/s.exec(data);
+    if (!m) return true;
+    const url = m[1].trim();
+    if (!/^https?:\/\/\S+$/i.test(url)) return true;
+    const now = Date.now();
+    if (tab.lastRemoteOpen && tab.lastRemoteOpen.url === url && now - tab.lastRemoteOpen.at < 5000) return true;
+    tab.lastRemoteOpen = { url, at: now };
+    window.open(url);
+    let host = url;
+    try { host = new URL(url).host; } catch {}
+    showToast('Opened link', `${tab.label} → ${host}`);
+    return true;
+  });
+
   // A pasted image (a screenshot, a copied file preview) arrives on the OS
   // clipboard as a bitmap, not text, so navigator.clipboard.readText() alone
   // would silently do nothing with it. Check for one first: on an SSH tab it

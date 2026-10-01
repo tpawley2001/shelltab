@@ -1,0 +1,34 @@
+#!/bin/sh
+# shelltab-open URL — open a link on the computer running ShellTab.
+#
+# Set as $BROWSER on a headless server; xdg-open (with no desktop), Python's
+# webbrowser, gh, and Node's `open` all honour it. The URL travels back down
+# the terminal as an invisible OSC 7717 sequence that ShellTab catches and
+# hands to the local browser. Other terminals ignore the sequence, so the URL
+# is also printed to stderr as a fallback.
+url="$1"
+[ -n "$url" ] || { echo "usage: shelltab-open URL" >&2; exit 2; }
+
+seq=$(printf '\033]7717;open;%s\007' "$url")
+
+# Find the terminal. Inside tmux, write straight to the attached client's tty
+# so no passthrough setting is needed. Otherwise /dev/tty — but a launcher
+# that detaches (setsid) has no controlling terminal, so fall back to the
+# login's $SSH_TTY, which the environment still carries.
+tty=""
+if [ -n "$TMUX" ]; then
+  tty=$(tmux display-message -p '#{client_tty}' 2>/dev/null)
+fi
+if [ -z "$tty" ] && ( : > /dev/tty ) 2>/dev/null; then
+  tty=/dev/tty
+fi
+if [ -z "$tty" ] && [ -n "$SSH_TTY" ] && [ -w "$SSH_TTY" ]; then
+  tty="$SSH_TTY"
+fi
+
+if [ -n "$tty" ] && printf '%s' "$seq" > "$tty" 2>/dev/null; then
+  echo "Opening in ShellTab: $url" >&2
+  exit 0
+fi
+echo "Open this link: $url" >&2
+exit 1

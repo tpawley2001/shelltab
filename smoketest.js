@@ -98,6 +98,22 @@ function run(mainWindow, app) {
       `({ ok: !!document.querySelector('.term-wrapper.active .xterm-screen'), rows: document.querySelectorAll('.xterm-rows').length })`);
     await probe('toolbar buttons wired',
       `({ ok: ['btn-new-tab','btn-new-ssh','btn-sftp','btn-ftp','btn-quicklinks','btn-nudges','btn-keepalive','btn-suggest','btn-update'].every(i => !!document.getElementById(i)) })`);
+    await probe('a remote OSC 7717 open request reaches window.open (http only, deduped)',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const opened = [];
+         const real = window.open;
+         window.open = (u) => { opened.push(u); return null; };
+         try {
+           const w = (s) => new Promise(r => tab.xterm.write(s, r));
+           await w('\\x1b]7717;open;https://example.com/login?x=1\\x07');
+           await w('\\x1b]7717;open;https://example.com/login?x=1\\x07');
+           await w('\\x1b]7717;open;file:///etc/passwd\\x07');
+           await w('\\x1b]7717;open;javascript:alert(1)\\x07');
+         } finally { window.open = real; }
+         return { ok: opened.length === 1 && opened[0] === 'https://example.com/login?x=1', opened };
+       })()`);
+
     // ── Inline command suggestions ──
 
     await probe('history outranks the built-in commands',

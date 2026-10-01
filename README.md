@@ -51,6 +51,24 @@ cursor — **Tab** or **Right arrow** takes it, anything else ignores it.
   closing any dialog puts the keyboard straight back on the active terminal, so there is nothing to click
   before typing (a field you moved to yourself — the FTP form, a rename box — keeps focus)
 
+### Links Open on Your Computer
+Clicking a URL in any tab opens it in your local browser. For a **headless server**, ShellTab also brings back
+links that a remote program tries to open by itself: a CLI login (`claude`, `gh auth login`), `xdg-open`,
+Python's `webbrowser`. Install the small helper on the server and set it as `$BROWSER`:
+
+```sh
+install -m 755 remote/shelltab-open ~/.local/bin/shelltab-open
+# ~/.bashrc
+if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+  export BROWSER="$HOME/.local/bin/shelltab-open"
+fi
+```
+
+The helper writes the URL back down the terminal as an invisible `OSC 7717;open;<url>` sequence, and ShellTab
+opens it locally and shows a toast. It finds the terminal through tmux, through a detached launcher with no
+controlling tty (via `$SSH_TTY`), and also prints the URL so it still works in another terminal. ShellTab only acts
+on `http`/`https` links, and drops a repeat of the same link within 5 seconds.
+
 ### SFTP Browser
 - A graphical file browser riding the **same** SSH connection — no second login
 - **Follows the terminal**: `cd` somewhere in the shell and the browser goes with you
