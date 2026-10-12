@@ -13,7 +13,7 @@ A cross-platform tabbed terminal with **native SSH**, an **SFTP file browser tha
 - Create, close, rename, and cycle through tabs
 - Keyboard shortcuts below
 - Double-click a tab title to rename it
-- Uses your default shell (bash/zsh on Linux, PowerShell/cmd on Windows)
+- Uses your default shell (bash/zsh on Linux, PowerShell on Windows — pwsh 7 if installed — so Up arrow recalls commands from earlier sessions)
 - URLs in terminal output are clickable and open in your desktop browser, never inside the app
 
 ### Command Suggestions

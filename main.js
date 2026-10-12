@@ -116,8 +116,25 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
+// On Windows, PowerShell rather than %COMSPEC%: COMSPEC is always cmd.exe, and
+// cmd forgets its history with every process, so Up arrow in a new tab brought
+// back nothing. PSReadLine keeps history on disk across sessions. PowerShell 7
+// first when it is installed, then the built-in 5.1, then cmd as a last resort.
+function findWindowsShell() {
+  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const candidates = [
+    ...dirs.map((d) => path.join(d, 'pwsh.exe')),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
+    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+  ];
+  for (const file of candidates) {
+    try { if (fs.statSync(file).isFile()) return file; } catch {}
+  }
+  return process.env.COMSPEC || 'cmd.exe';
+}
+
 const defaultShell = process.platform === 'win32'
-  ? (process.env.COMSPEC || 'powershell.exe')
+  ? findWindowsShell()
   : (process.env.SHELL || '/bin/bash');
 
 ipcMain.handle('term:create', (event, opts = {}) => {
