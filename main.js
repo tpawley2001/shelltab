@@ -373,6 +373,13 @@ ipcMain.handle('ssh:defaultUser', () => {
 // terminal or handed to SFTP.
 const { clipboard } = require('electron');
 
+// navigator.clipboard.writeText refuses when the window is not focused, which
+// an OSC 52 copy from tmux can easily arrive during; the main-process
+// clipboard has no such rule.
+ipcMain.on('clipboard:writeText', (e, text) => {
+  if (typeof text === 'string') clipboard.writeText(text);
+});
+
 ipcMain.handle('clipboard:readImage', () => {
   const img = clipboard.readImage();
   if (img.isEmpty()) return null;

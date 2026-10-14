@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Clipboard
   clipboardReadImage: () => ipcRenderer.invoke('clipboard:readImage'),
+  clipboardWriteText: (text) => ipcRenderer.send('clipboard:writeText', text),
 
   // Dialogs
   saveFileDialog: (name) => ipcRenderer.invoke('dialog:saveFile', name),

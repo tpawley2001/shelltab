@@ -132,7 +132,57 @@ function run(mainWindow, app) {
          return { ok: opened.length === 2 && opened[0] === 'https://clau.de/yourthoughts' && opened[1] === 'https://example.com/plain', opened };
        })()`);
 
-    // ── Inline command suggestions ──
+    // ── Copy on select / stray mouse reports ──
+
+    await probe('highlighting copies the selection, trailing blanks trimmed',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const w = (d) => new Promise(r => tab.xterm.write(d, r));
+         await w('\\r\\ncopy-on-select-probe      \\r\\n');
+         const buf = tab.xterm.buffer.active;
+         const row = buf.baseY + buf.cursorY - 1;
+         tab.xterm.selectLines(row, row);
+         tab.wrapper.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+         window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+         await new Promise(r => setTimeout(r, 150));
+         const clip = await navigator.clipboard.readText().catch((e) => 'ERR ' + e);
+         const badge = tab.wrapper.querySelector('.copy-badge.show');
+         tab.xterm.clearSelection();
+         return { ok: clip === 'copy-on-select-probe' && !!badge, clip, badge: badge?.textContent };
+       })()`);
+
+    await probe('OSC 52 from tmux sets the clipboard; a read-back request is ignored',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const w = (d) => new Promise(r => tab.xterm.write(d, r));
+         const sent = [];
+         const sub = tab.xterm.onData((d) => sent.push(d));
+         await w('\\x1b]52;c;' + btoa('osc52-probe ✓'.replace(/[^\\x00-\\xff]/g, (c) => unescape(encodeURIComponent(c)))) + '\\x07');
+         await new Promise(r => setTimeout(r, 100));
+         const clip = await navigator.clipboard.readText().catch((e) => 'ERR ' + e);
+         await w('\\x1b]52;c;?\\x07');
+         await new Promise(r => setTimeout(r, 100));
+         sub.dispose();
+         const after = await navigator.clipboard.readText().catch((e) => 'ERR ' + e);
+         return { ok: clip === 'osc52-probe ✓' && after === clip && sent.length === 0, clip, after, sent };
+       })()`);
+
+    await probe('mouse/focus reporting left on by a dead program is switched off at the next prompt',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const w = (d) => new Promise(r => tab.xterm.write(d, r));
+         const osc7 = '\\x1b]7;file://probe/tmp\\x07';
+         // tmux is alive on the alternate screen: its mouse mode must survive.
+         await w('\\x1b[?1049h\\x1b[?1000h\\x1b[?1006h\\x1b[?1004h' + osc7);
+         const inTmux = tab.xterm.modes.mouseTrackingMode;
+         // tmux gone, back at a bare prompt with reporting still on.
+         await w('\\x1b[?1049l' + osc7);
+         await w('');
+         const atPrompt = tab.xterm.modes.mouseTrackingMode;
+         const focus = tab.xterm.modes.sendFocusMode;
+         return { ok: inTmux === 'vt200' && atPrompt === 'none' && focus === false, inTmux, atPrompt, focus };
+       })()`);
+
 
     await probe('history outranks the built-in commands',
       `(() => {

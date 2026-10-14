@@ -54,6 +54,42 @@ const TERM_THEME = {
 
 const { READY_MARKER, buildBootstrap } = require('./shellint');
 
+// tmux, Claude Code and vim switch on mouse and focus reporting. When one of
+// them dies without switching it off again — the SSH link drops, a reconnect
+// lands at a bare prompt, the app crashes — xterm keeps sending reports, and
+// bash types every click (`[<0;12;5M`) and every window focus (`[I`) into the
+// command line. These are the modes to put back.
+const MOUSE_MODES_OFF = '\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l';
+
+// Trailing blanks are padding from the screen, not text anyone selected, and
+// a drag past the last line drags in empty rows too.
+function cleanSelection(text) {
+  return text.replace(/[ \t]+(?=\r?\n|$)/g, '').replace(/(\r?\n)+$/, '');
+}
+
+function copyText(text) {
+  if (!text) return false;
+  if (window.api.clipboardWriteText) window.api.clipboardWriteText(text);
+  else navigator.clipboard.writeText(text).catch(() => {});
+  return true;
+}
+
+// A small badge in the terminal's corner rather than a toast: copying happens
+// on every highlight, and a five-second toast each time would be noise.
+function flashCopied(wrapper, text) {
+  let badge = wrapper.querySelector('.copy-badge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'copy-badge';
+    wrapper.appendChild(badge);
+  }
+  const lines = text.split('\n').length;
+  badge.textContent = lines > 1 ? `Copied ${lines} lines` : `Copied ${text.length} chars`;
+  badge.classList.remove('show');
+  void badge.offsetWidth; // restart the fade when copies come back to back
+  badge.classList.add('show');
+}
+
 // ── Transport: a tab is either a local pty or a native SSH session ──
 
 function tabSend(tab, data) {
@@ -198,6 +234,10 @@ async function connectSsh(tab, session, { fresh = false } = {}) {
   tab.restoreSession = null;
 
   flushSuppressed(tab);
+  // Whatever the last session left switched on (tmux's alternate screen, its
+  // mouse reporting) belongs to a program that is gone; the new shell starts
+  // from a plain screen.
+  if (!fresh) tab.xterm.write(`\x1b[?1049l${MOUSE_MODES_OFF}`);
   tab.xterm.write(`${fresh ? '' : '\r\n'}\x1b[90m${fresh ? 'Connecting' : 'Reconnecting'} to ${sessionTarget(session)}…\x1b[0m\r\n`);
 
   const res = await window.api.sshConnect({ ...session, cols: tab.xterm.cols, rows: tab.xterm.rows });
@@ -389,6 +429,13 @@ async function createTab(opts = {}) {
   xterm.parser.registerOscHandler(7, (uri) => {
     // A prompt just fired: nothing is half-typed any more.
     tab.suggest.reset();
+    // A shell prompt on the normal screen means nothing running wants the
+    // mouse: tmux lives on the alternate screen, and the prompt hook does not
+    // run while Claude Code or vim is up. Reporting still on here was left by
+    // a program that exited without turning it off.
+    if (xterm.buffer.active.type === 'normal' && xterm.modes.mouseTrackingMode !== 'none') {
+      xterm.write(MOUSE_MODES_OFF);
+    }
     const m = /^file:\/\/[^/]*(\/.*)$/.exec(uri);
     if (m && tab.sshId != null) {
       let dir = m[1];
@@ -449,7 +496,7 @@ async function createTab(opts = {}) {
     // Ctrl+Shift+C/V are the unambiguous terminal clipboard bindings; plain
     // Ctrl+C still reaches the remote as SIGINT unless there is a selection.
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'c') {
-      if (xterm.hasSelection()) navigator.clipboard.writeText(xterm.getSelection());
+      if (xterm.hasSelection()) copyText(cleanSelection(xterm.getSelection()));
       return false;
     }
     if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') {
@@ -461,7 +508,7 @@ async function createTab(opts = {}) {
       return false;
     }
     if (e.ctrlKey && !e.shiftKey && e.key === 'c' && xterm.hasSelection()) {
-      navigator.clipboard.writeText(xterm.getSelection());
+      copyText(cleanSelection(xterm.getSelection()));
       return false;
     }
     return true;
@@ -470,12 +517,48 @@ async function createTab(opts = {}) {
   wrapper.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (xterm.hasSelection()) {
-      navigator.clipboard.writeText(xterm.getSelection());
+      copyText(cleanSelection(xterm.getSelection()));
       xterm.clearSelection();
       showToast('Clipboard', 'Copied selection');
     } else {
       pasteClipboard();
     }
+  });
+
+  // Highlighting copies, the way PuTTY and MobaXterm do: finishing a drag, or
+  // a double/triple click on a word or line, puts the text on the clipboard.
+  // The mouseup is watched on the window, not the terminal, because a drag
+  // often ends outside it. With a program holding the mouse (tmux with
+  // `mouse on`) xterm only selects while Shift is held — tmux's own selection
+  // arrives through OSC 52 below instead.
+  wrapper.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    window.addEventListener('mouseup', () => {
+      // xterm settles the selection in its own mouseup handler; read it after.
+      setTimeout(() => {
+        if (!xterm.hasSelection()) return;
+        const text = cleanSelection(xterm.getSelection());
+        if (copyText(text)) flashCopied(wrapper, text);
+      }, 0);
+    }, { once: true });
+  });
+
+  // OSC 52: a remote program setting the clipboard. tmux (set-clipboard on)
+  // sends it when a mouse selection or copy-mode yank finishes, so highlighting
+  // inside tmux copies too. Reading the clipboard back ("?") is never answered
+  // — that would hand the remote whatever was copied locally.
+  xterm.parser.registerOscHandler(52, (data) => {
+    const sep = data.indexOf(';');
+    const payload = sep === -1 ? '' : data.slice(sep + 1);
+    if (!payload || payload === '?' || payload.length > 4 * 1024 * 1024) return true;
+    let text;
+    try {
+      text = new TextDecoder().decode(Uint8Array.from(atob(payload), (c) => c.charCodeAt(0)));
+    } catch {
+      return true;
+    }
+    if (copyText(text)) flashCopied(wrapper, text);
+    return true;
   });
 
   const tabEl = document.createElement('div');

@@ -127,6 +127,17 @@ Terminal shortcuts use `Ctrl+Shift` so that plain `Ctrl+C`, `Ctrl+T` and `Ctrl+W
 still reach the remote shell. Right-click copies a selection, or pastes when
 there is none.
 
+### Copy on Select
+- **Highlighting copies**: finish a drag, or double/triple-click a word or line, and the text is on the
+  clipboard — a small "Copied" badge confirms it. Trailing padding blanks and empty rows are trimmed.
+- **Works inside tmux too**: with `mouse on`, tmux owns the drag (hold `Shift` for ShellTab's own
+  selection instead). ShellTab honours **OSC 52**, so with `set -g set-clipboard on` a tmux mouse
+  selection or copy-mode yank lands on the local clipboard. Requests to *read* the clipboard back are ignored.
+- **No stray characters from clicks**: a program that turns on mouse or focus reporting and dies without
+  turning it off (tmux over a dropped link, a crashed TUI) used to leave clicks typing `[<0;12;5M` and
+  focus changes typing `[I` at the prompt. ShellTab now switches that reporting off when a shell prompt
+  returns on the normal screen (needs shell integration's OSC 7), and on every reconnect.
+
 ### Timed Nudges
 - Configure periodic actions on a per-tab or global (active tab) basis
 - Two nudge types:

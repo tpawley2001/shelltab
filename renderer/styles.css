@@ -1570,3 +1570,30 @@ body.resizing {
   user-select: none;
   cursor: col-resize;
 }
+
+/* Copy-on-select confirmation, top right of the terminal */
+.copy-badge {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 5;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--bg-light);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.copy-badge.show {
+  animation: copy-badge 1.2s ease-out forwards;
+}
+
+@keyframes copy-badge {
+  0% { opacity: 0; transform: translateY(-4px); }
+  12% { opacity: 1; transform: none; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
