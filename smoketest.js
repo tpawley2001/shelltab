@@ -167,6 +167,28 @@ function run(mainWindow, app) {
          return { ok: clip === 'osc52-probe ✓' && after === clip && sent.length === 0, clip, after, sent };
        })()`);
 
+    // A real Ctrl+V through Chromium's input pipeline, so the browser's own
+    // paste event fires too — only preventDefault() in the key handler stops
+    // xterm typing that one as well as ours, i.e. every paste landing twice.
+    {
+      const { clipboard } = require('electron');
+      clipboard.writeText('pasteonce42');
+      await mainWindow.webContents.executeJavaScript(`window.__testActiveTab().xterm.focus()`);
+      mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['control'] });
+      mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['control'] });
+      await new Promise((r) => setTimeout(r, 1200));
+      await probe('Ctrl+V pastes the clipboard exactly once',
+        `(() => {
+           const tab = window.__testActiveTab();
+           const buf = tab.xterm.buffer.active;
+           const line = buf.getLine(buf.baseY + buf.cursorY).translateToString(true);
+           tab.xterm.input('\\x15');
+           const n = line.split('pasteonce42').length - 1;
+           return { ok: n === 1, n, line };
+         })()`);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
     await probe('mouse/focus reporting left on by a dead program is switched off at the next prompt',
       `(async () => {
          const tab = window.__testActiveTab();

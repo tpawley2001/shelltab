@@ -499,11 +499,11 @@ async function createTab(opts = {}) {
       if (xterm.hasSelection()) copyText(cleanSelection(xterm.getSelection()));
       return false;
     }
-    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') {
-      pasteClipboard();
-      return false;
-    }
-    if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
+    // Returning false only stops xterm handling the key — the browser still
+    // fires its own paste event on xterm's textarea, which xterm types in
+    // too. preventDefault() suppresses that, or every paste lands twice.
+    if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+      e.preventDefault();
       pasteClipboard();
       return false;
     }
