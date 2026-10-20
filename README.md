@@ -142,6 +142,7 @@ there is none.
 - Configure periodic actions on a per-tab or global (active tab) basis
 - Two nudge types:
   - **Terminal input**: Sends text directly to the PTY (e.g., keep-alive commands, periodic `ls`, health checks)
+    - With **Press Enter after typing** checked (the default), a real Enter (CR) follows as its own keystroke ~150 ms later, so the line is submitted in shells *and* in TUIs like Claude Code that would otherwise read text+newline as a paste
   - **Overlay notification**: Displays a toast notification over the terminal without affecting the shell
 - Configurable interval (in seconds)
 - Pause, resume, and remove individual nudges

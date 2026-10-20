@@ -189,6 +189,21 @@ function run(mainWindow, app) {
       await new Promise((r) => setTimeout(r, 300));
     }
 
+    // A terminal nudge must submit, not just type: Enter goes as a separate
+    // CR, so the shell runs it and $((6*7)) expands to 42.
+    await probe('terminal nudge types its text and presses Enter',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         window.__testExecuteNudge({ type: 'terminal', text: 'echo nudge-probe-$((6*7))', targetTabId: tab.tabId, appendNewline: true });
+         await new Promise(r => setTimeout(r, 1200));
+         const buf = tab.xterm.buffer.active;
+         let ran = false;
+         for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
+           if (/^nudge-probe-42\\s*$/.test(buf.getLine(i).translateToString(true))) ran = true;
+         }
+         return { ok: ran, ran };
+       })()`);
+
     await probe('mouse/focus reporting left on by a dead program is switched off at the next prompt',
       `(async () => {
          const tab = window.__testActiveTab();

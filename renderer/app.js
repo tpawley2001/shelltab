@@ -1495,13 +1495,20 @@ document.getElementById('nudge-add-btn').addEventListener('click', () => {
   renderNudgeList();
 });
 
+const NUDGE_ENTER_DELAY_MS = 150;
+
 function executeNudge(nudge) {
   const targetId = nudge.targetTabId || activeTabId;
   if (!targetId) return;
 
   if (nudge.type === 'terminal') {
     const tab = tabs.get(targetId);
-    if (tab) tabSend(tab, nudge.appendNewline ? nudge.text + '\n' : nudge.text);
+    if (!tab) return;
+    tabSend(tab, nudge.text);
+    // Enter is CR, not LF, and it goes as its own write a beat later: a TUI
+    // like Claude Code reads text+Enter arriving in one chunk as a paste and
+    // just inserts a newline instead of submitting.
+    if (nudge.appendNewline) setTimeout(() => { if (tabs.has(targetId)) tabSend(tab, '\r'); }, NUDGE_ENTER_DELAY_MS);
   } else {
     const tabLabel = nudge.targetTabId
       ? (tabs.get(nudge.targetTabId)?.label || 'Unknown')
@@ -1952,4 +1959,5 @@ if (new URLSearchParams(window.location.search).has('selftest')) {
   window.__testRestorePlaceholder = createLocalPlaceholderForSsh;
   window.__testHydrateQuicklink = hydrateFromQuicklink;
   window.__testSuggest = suggest;
+  window.__testExecuteNudge = executeNudge;
 }
