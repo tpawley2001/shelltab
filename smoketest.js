@@ -204,6 +204,29 @@ function run(mainWindow, app) {
          return { ok: ran, ran };
        })()`);
 
+    await probe('limit-reset nudge reads the reset time off the screen and fires once after it',
+      `(async () => {
+         const tab = window.__testActiveTab();
+         const w = (d) => new Promise(r => tab.xterm.write(d, r));
+         await w('\\r\\n5-hour limit reached \\u2219 resets 11:59pm (America/Los_Angeles)\\r\\n');
+         const nudge = { type: 'limit', text: 'echo limit-probe-$((6*7))', targetTabId: tab.tabId, appendNewline: true };
+         window.__testExecuteNudge(nudge);
+         const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).format(new Date(nudge.resetAt));
+         const scheduled = parts === '23:59';
+         nudge.resetAt = Date.now() - 600000;                  // pretend the reset has passed
+         window.__testExecuteNudge(nudge);
+         await new Promise(r => setTimeout(r, 1200));
+         const buf = tab.xterm.buffer.active;
+         let ran = 0;
+         for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
+           if (/^limit-probe-42\\s*$/.test(buf.getLine(i).translateToString(true))) ran++;
+         }
+         window.__testExecuteNudge(nudge);                     // same notice still on screen
+         const rearmed = nudge.resetAt != null;
+         const quiet = !window.__testLimitWatch.findLimitReset(['OpenRouter rate limit resets 3pm']);
+         return { ok: scheduled && ran === 1 && !rearmed && quiet, scheduled, parts, ran, rearmed, quiet };
+       })()`);
+
     await probe('mouse/focus reporting left on by a dead program is switched off at the next prompt',
       `(async () => {
          const tab = window.__testActiveTab();

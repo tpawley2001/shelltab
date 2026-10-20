@@ -10,6 +10,7 @@ function openLink(uri) {
 const sftp = require('./sftp');
 const dialogs = require('./dialogs');
 const suggest = require('./suggest');
+const limitwatch = require('./limitwatch');
 
 // ── State ──
 const tabs = new Map();
@@ -1464,6 +1465,11 @@ function updateNudgeTargets() {
   }
 }
 
+document.getElementById('nudge-type').addEventListener('change', (e) => {
+  // A limit nudge fires when the reset comes, not on a timer.
+  document.getElementById('nudge-interval-row').classList.toggle('hidden', e.target.value === 'limit');
+});
+
 document.getElementById('nudge-add-btn').addEventListener('click', () => {
   const text = document.getElementById('nudge-text').value.trim();
   if (!text) return;
@@ -1488,7 +1494,7 @@ document.getElementById('nudge-add-btn').addEventListener('click', () => {
   nudge.intervalHandle = setInterval(() => {
     if (!nudge.active) return;
     executeNudge(nudge);
-  }, interval * 1000);
+  }, type === 'limit' ? LIMIT_SCAN_MS : interval * 1000);
 
   nudges.push(nudge);
   document.getElementById('nudge-text').value = '';
@@ -1496,19 +1502,49 @@ document.getElementById('nudge-add-btn').addEventListener('click', () => {
 });
 
 const NUDGE_ENTER_DELAY_MS = 150;
+const LIMIT_SCAN_MS = 10000;
+const LIMIT_SLACK_MS = 90000; // fire a little after the stated reset, not on it
+
+function typeIntoTab(tab, text, pressEnter) {
+  tabSend(tab, text);
+  // Enter is CR, not LF, and it goes as its own write a beat later: a TUI
+  // like Claude Code reads text+Enter arriving in one chunk as a paste and
+  // just inserts a newline instead of submitting.
+  if (pressEnter) setTimeout(() => { if (tabs.has(tab.tabId)) tabSend(tab, '\r'); }, NUDGE_ENTER_DELAY_MS);
+}
+
+// One scan of a "When usage limit resets" nudge: spot a limit notice on the
+// tab's screen, then type the text once its reset time (+ slack) has passed.
+// The notice that fired stays on screen afterwards (and "resets 3pm" read
+// after 3pm means tomorrow), so that exact line is ignored until it's gone.
+function checkLimitNudge(nudge, tab) {
+  const now = Date.now();
+  if (nudge.resetAt) {
+    if (now < nudge.resetAt + LIMIT_SLACK_MS) return;
+    typeIntoTab(tab, nudge.text, nudge.appendNewline);
+    nudge.firedLine = nudge.resetLine;
+    nudge.resetAt = null;
+    nudge.resetLine = null;
+    renderNudgeList();
+    return;
+  }
+  const hit = limitwatch.findLimitReset(limitwatch.screenLines(tab.xterm), now);
+  if (!hit) { nudge.firedLine = null; return; }
+  if (hit.line === nudge.firedLine) return;
+  nudge.resetAt = hit.resetAt;
+  nudge.resetLine = hit.line;
+  renderNudgeList();
+}
 
 function executeNudge(nudge) {
   const targetId = nudge.targetTabId || activeTabId;
   if (!targetId) return;
 
-  if (nudge.type === 'terminal') {
+  if (nudge.type === 'terminal' || nudge.type === 'limit') {
     const tab = tabs.get(targetId);
     if (!tab) return;
-    tabSend(tab, nudge.text);
-    // Enter is CR, not LF, and it goes as its own write a beat later: a TUI
-    // like Claude Code reads text+Enter arriving in one chunk as a paste and
-    // just inserts a newline instead of submitting.
-    if (nudge.appendNewline) setTimeout(() => { if (tabs.has(targetId)) tabSend(tab, '\r'); }, NUDGE_ENTER_DELAY_MS);
+    if (nudge.type === 'limit') checkLimitNudge(nudge, tab);
+    else typeIntoTab(tab, nudge.text, nudge.appendNewline);
   } else {
     const tabLabel = nudge.targetTabId
       ? (tabs.get(nudge.targetTabId)?.label || 'Unknown')
@@ -1533,11 +1569,14 @@ function renderNudgeList() {
       ? (tabs.get(nudge.targetTabId)?.label || `Tab ${nudge.targetTabId}`)
       : 'Active tab';
     const typeLabel = nudge.type === 'terminal' ? 'Terminal input' : 'Notification';
+    const schedule = nudge.type !== 'limit' ? `${typeLabel} | Every ${nudge.interval}s`
+      : nudge.resetAt ? `On limit reset | Sends at ${new Date(nudge.resetAt + LIMIT_SLACK_MS).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+      : 'On limit reset | Watching the screen';
 
     el.innerHTML = `
       <div class="nudge-info">
         <div class="nudge-label">${escapeHtml(nudge.text)}</div>
-        <div class="nudge-meta">${typeLabel} | Every ${nudge.interval}s | ${targetLabel}</div>
+        <div class="nudge-meta">${schedule} | ${targetLabel}</div>
       </div>
       <button class="nudge-toggle ${nudge.active ? '' : 'paused'}">${nudge.active ? 'Pause' : 'Resume'}</button>
       <button class="nudge-remove" title="Remove">&times;</button>
@@ -1545,6 +1584,7 @@ function renderNudgeList() {
 
     el.querySelector('.nudge-toggle').addEventListener('click', () => {
       nudge.active = !nudge.active;
+      if (!nudge.active) { nudge.resetAt = null; nudge.resetLine = null; }
       renderNudgeList();
     });
 
@@ -1960,4 +2000,5 @@ if (new URLSearchParams(window.location.search).has('selftest')) {
   window.__testHydrateQuicklink = hydrateFromQuicklink;
   window.__testSuggest = suggest;
   window.__testExecuteNudge = executeNudge;
+  window.__testLimitWatch = limitwatch;
 }

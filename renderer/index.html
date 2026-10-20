@@ -182,13 +182,14 @@
       <div id="nudge-form">
         <input type="text" id="nudge-text" placeholder="Text to send or display">
         <div id="nudge-options">
-          <label>Interval (seconds):
+          <label id="nudge-interval-row">Interval (seconds):
             <input type="number" id="nudge-interval" value="60" min="1">
           </label>
           <label>Type:
             <select id="nudge-type">
               <option value="terminal">Send to terminal</option>
               <option value="notification">Overlay notification</option>
+              <option value="limit">When usage limit resets</option>
             </select>
           </label>
           <label>Target tab:
@@ -196,7 +197,7 @@
               <option value="active">Active tab</option>
             </select>
           </label>
-          <label><input type="checkbox" id="nudge-newline" checked> Press Enter after typing (terminal mode)</label>
+          <label><input type="checkbox" id="nudge-newline" checked> Press Enter after typing (terminal / limit reset)</label>
         </div>
         <button id="nudge-add-btn">Add Nudge</button>
       </div>

@@ -144,6 +144,7 @@ there is none.
   - **Terminal input**: Sends text directly to the PTY (e.g., keep-alive commands, periodic `ls`, health checks)
     - With **Press Enter after typing** checked (the default), a real Enter (CR) follows as its own keystroke ~150 ms later, so the line is submitted in shells *and* in TUIs like Claude Code that would otherwise read text+newline as a paste
   - **Overlay notification**: Displays a toast notification over the terminal without affecting the shell
+  - **When usage limit resets**: Watches the tab's screen (every 10 s) for a CLI agent's usage-cap notice such as Claude Code's `5-hour limit reached ∙ resets 3pm` or `resets Oct 22, 3pm (America/Los_Angeles)`, then types the text (e.g. `continue`) 90 s after the stated reset. It fires once per notice, ignores lines that only mention a rate limit, and shows the scheduled time in the nudge list. The interval doesn't apply to this type
 - Configurable interval (in seconds)
 - Pause, resume, and remove individual nudges
 
