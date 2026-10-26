@@ -515,6 +515,19 @@ async function createTab(opts = {}) {
     return true;
   });
 
+  // Right-click is ours (copy/paste), never the remote's. With mouse reporting
+  // on, xterm would also forward the press — tmux (`mouse on`) answers it with
+  // its pane menu, and the text we paste then types into that menu, where `h`
+  // and `v` pick Horizontal/Vertical Split. Swallow the right button in the
+  // capture phase, before xterm's own listener on its element sees it.
+  const swallowRightButton = (e) => {
+    if (e.button !== 2) return;
+    e.stopPropagation();
+    if (e.type === 'mousedown') xterm.focus();
+  };
+  wrapper.addEventListener('mousedown', swallowRightButton, true);
+  wrapper.addEventListener('mouseup', swallowRightButton, true);
+
   wrapper.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (xterm.hasSelection()) {

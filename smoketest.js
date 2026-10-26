@@ -227,6 +227,40 @@ function run(mainWindow, app) {
          return { ok: scheduled && ran === 1 && !rearmed && quiet, scheduled, parts, ran, rearmed, quiet };
        })()`);
 
+    // tmux with `mouse on` turns a reported right-click into its pane menu,
+    // and the paste that follows types `h`/`v` into it — a surprise split.
+    // A real right-click must paste without reporting the button.
+    {
+      const { clipboard } = require('electron');
+      clipboard.writeText('rclickpaste');
+      const box = await mainWindow.webContents.executeJavaScript(`(async () => {
+        const tab = window.__testActiveTab();
+        await new Promise(r => tab.xterm.write('\\x1b[?1000h\\x1b[?1006h', r));
+        window.__rclickSent = [];
+        window.__rclickSub = tab.xterm.onData(d => window.__rclickSent.push(d));
+        const r = tab.xterm.element.querySelector('.xterm-screen').getBoundingClientRect();
+        return { x: Math.round(r.left + 40), y: Math.round(r.top + 20) };
+      })()`);
+      for (const type of ['mouseDown', 'mouseUp']) {
+        mainWindow.webContents.sendInputEvent({ type, x: box.x, y: box.y, button: 'right', clickCount: 1 });
+      }
+      await new Promise((r) => setTimeout(r, 1200));
+      await probe('right-click pastes without reporting the click to tmux',
+        `(async () => {
+           const tab = window.__testActiveTab();
+           window.__rclickSub.dispose();
+           await new Promise(r => tab.xterm.write('\\x1b[?1000l\\x1b[?1006l', r));
+           const sent = window.__rclickSent;
+           const reported = sent.some(d => /\\x1b\\[<2;|\\x1b\\[M"/.test(d));
+           const buf = tab.xterm.buffer.active;
+           const line = buf.getLine(buf.baseY + buf.cursorY).translateToString(true);
+           const pasted = line.includes('rclickpaste');
+           tab.xterm.input('\\x15');
+           return { ok: pasted && !reported, pasted, reported, sent, line };
+         })()`);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
     await probe('mouse/focus reporting left on by a dead program is switched off at the next prompt',
       `(async () => {
          const tab = window.__testActiveTab();
